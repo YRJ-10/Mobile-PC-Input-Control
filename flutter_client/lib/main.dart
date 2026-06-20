@@ -87,11 +87,12 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
   }
 
   void _onPanUpdate(DragUpdateDetails details) {
-    // details.delta gives us the dx and dy of the movement
+    // Menambahkan multiplier agar pergerakan mouse lebih cepat dan tidak terasa lambat
+    const double sensitivity = 2.5; 
     _sendCommand({
       "type": "MOUSE_MOVE",
-      "dx": details.delta.dx,
-      "dy": details.delta.dy,
+      "dx": details.delta.dx * sensitivity,
+      "dy": details.delta.dy * sensitivity,
     });
   }
 
