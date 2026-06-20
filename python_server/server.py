@@ -110,6 +110,7 @@ def execute_command(cmd):
 
 def start_server():
     pyautogui.FAILSAFE = False
+    pyautogui.PAUSE = 0  # MATIKAN JEDA DEFAULT 100ms AGAR MOUSE REAL-TIME!
     
     # Jalankan Audio Streamer di thread terpisah (berjalan terus menerus)
     audio_thread = threading.Thread(target=audio_streamer, daemon=True)
