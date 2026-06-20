@@ -3,7 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:permission_handler/permission_handler.dart';
-import 'package:sound_stream/sound_stream.dart';
+import 'package:flutter/services.dart';
 
 void main() {
   runApp(const MobilePCMediaApp());
@@ -45,16 +45,14 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
   bool _isListening = false;
   String _lastRecognizedWords = "";
 
-  // Audio Streaming Player
-  final PlayerStream _player = PlayerStream();
-  RawDatagramSocket? _udpSocket;
+  // Platform Channel untuk Low Latency Native Audio
+  static const platform = MethodChannel('com.mobilepcmedia/audio');
 
   @override
   void initState() {
     super.initState();
     _speech = stt.SpeechToText();
     _requestMicrophonePermission();
-    _initAudioPlayer();
   }
 
   Future<void> _requestMicrophonePermission() async {
@@ -64,34 +62,29 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
     }
   }
 
-  void _initAudioPlayer() async {
-    try {
-      // Inisialisasi pemutar PCM stream bawaan
-      await _player.initialize();
-      await _player.start();
-
-      // Mulai UDP Listener di port 8081 untuk menerima paket audio dari PC
-      _udpSocket = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 8081);
-      _udpSocket!.listen((RawSocketEvent e) {
-        Datagram? d = _udpSocket!.receive();
-        if (d != null) {
-          // data PCM 16-bit 16000Hz dituliskan ke dalam player stream
-          _player.writeChunk(d.data);
-        }
-      });
-    } catch (e) {
-      print("Error inisialisasi audio player: $e");
-    }
-  }
-
   @override
   void dispose() {
     _socket?.close();
-    _udpSocket?.close();
-    _player.stop();
     _ipController.dispose();
     _textController.dispose();
+    _stopNativeAudioReceiver();
     super.dispose();
+  }
+
+  Future<void> _startNativeAudioReceiver() async {
+    try {
+      await platform.invokeMethod('startAudioReceiver');
+    } on PlatformException catch (e) {
+      print("Gagal memulai Native Audio: '${e.message}'.");
+    }
+  }
+
+  Future<void> _stopNativeAudioReceiver() async {
+    try {
+      await platform.invokeMethod('stopAudioReceiver');
+    } on PlatformException catch (e) {
+      print("Gagal menghentikan Native Audio: '${e.message}'.");
+    }
   }
 
   void _connectToServer() async {
@@ -102,13 +95,16 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
       setState(() => _statusMessage = "Connecting...");
       _socket = await Socket.connect(ip, 8080, timeout: const Duration(seconds: 5));
       
-      // MENGHILANGKAN DELAY: Matikan Nagle's Algorithm agar perintah langsung dikirim
+      // Matikan Nagle's Algorithm agar perintah langsung dikirim tanpa delay
       _socket!.setOption(SocketOption.tcpNoDelay, true);
 
       setState(() {
         _isConnected = true;
         _statusMessage = "Connected to $ip";
       });
+
+      // Mulai jalankan Audio Receiver di Native Kotlin (Bypass Flutter)
+      _startNativeAudioReceiver();
 
       _socket!.listen(
         (data) {},
@@ -126,6 +122,7 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
 
   void _disconnect() {
     _socket?.close();
+    _stopNativeAudioReceiver();
     setState(() {
       _isConnected = false;
       _statusMessage = "Disconnected";
@@ -139,18 +136,17 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
     }
   }
 
-  // Variabel untuk menampung pergerakan agar tidak spam
+  // --- MOUSE CONTROLS ---
   double _accumulatedDx = 0;
   double _accumulatedDy = 0;
   DateTime _lastPanTime = DateTime.now();
 
-  // --- MOUSE CONTROLS ---
   void _onPanUpdate(DragUpdateDetails details) {
     _accumulatedDx += details.delta.dx;
     _accumulatedDy += details.delta.dy;
 
     final now = DateTime.now();
-    // THROTTLING: Hanya kirim data 60 kali per detik (setiap ~16ms)
+    // Throttling 60 FPS
     if (now.difference(_lastPanTime).inMilliseconds >= 16) {
       const double sensitivity = 2.5; 
       _sendCommand({
@@ -158,7 +154,6 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
         "dx": _accumulatedDx * sensitivity,
         "dy": _accumulatedDy * sensitivity,
       });
-      
       _lastPanTime = now;
       _accumulatedDx = 0;
       _accumulatedDy = 0;
