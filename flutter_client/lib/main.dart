@@ -1,121 +1,225 @@
+import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 
 void main() {
-  runApp(const MyApp());
+  runApp(const MobilePCMediaApp());
 }
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+class MobilePCMediaApp extends StatelessWidget {
+  const MobilePCMediaApp({super.key});
 
-  // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Flutter Demo',
-      theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // TRY THIS: Try running your application with "flutter run". You'll see
-        // the application has a purple toolbar. Then, without quitting the app,
-        // try changing the seedColor in the colorScheme below to Colors.green
-        // and then invoke "hot reload" (save your changes or press the "hot
-        // reload" button in a Flutter-supported IDE, or press "r" if you used
-        // the command line to start the app).
-        //
-        // Notice that the counter didn't reset back to zero; the application
-        // state is not lost during the reload. To reset the state, use hot
-        // restart instead.
-        //
-        // This works for code too, not just values: Most code changes can be
-        // tested with just a hot reload.
-        colorScheme: .fromSeed(seedColor: Colors.deepPurple),
+      title: 'PC Remote Control',
+      theme: ThemeData.dark().copyWith(
+        primaryColor: Colors.teal,
+        scaffoldBackgroundColor: const Color(0xFF1E1E2C),
       ),
-      home: const MyHomePage(title: 'Flutter Demo Home Page'),
+      home: const RemoteHomePage(),
     );
   }
 }
 
-class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.title});
-
-  // This widget is the home page of your application. It is stateful, meaning
-  // that it has a State object (defined below) that contains fields that affect
-  // how it looks.
-
-  // This class is the configuration for the state. It holds the values (in this
-  // case the title) provided by the parent (in this case the App widget) and
-  // used by the build method of the State. Fields in a Widget subclass are
-  // always marked "final".
-
-  final String title;
+class RemoteHomePage extends StatefulWidget {
+  const RemoteHomePage({super.key});
 
   @override
-  State<MyHomePage> createState() => _MyHomePageState();
+  State<RemoteHomePage> createState() => _RemoteHomePageState();
 }
 
-class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
+class _RemoteHomePageState extends State<RemoteHomePage> {
+  final TextEditingController _ipController = TextEditingController();
+  final TextEditingController _textController = TextEditingController();
+  
+  Socket? _socket;
+  bool _isConnected = false;
+  String _statusMessage = "Disconnected";
 
-  void _incrementCounter() {
+  @override
+  void dispose() {
+    _socket?.close();
+    _ipController.dispose();
+    _textController.dispose();
+    super.dispose();
+  }
+
+  void _connectToServer() async {
+    final ip = _ipController.text.trim();
+    if (ip.isEmpty) return;
+
+    try {
+      setState(() => _statusMessage = "Connecting...");
+      _socket = await Socket.connect(ip, 8080, timeout: const Duration(seconds: 5));
+      setState(() {
+        _isConnected = true;
+        _statusMessage = "Connected to $ip";
+      });
+
+      _socket!.listen(
+        (data) {},
+        onError: (error) {
+          _disconnect();
+        },
+        onDone: () {
+          _disconnect();
+        },
+      );
+    } catch (e) {
+      setState(() => _statusMessage = "Connection failed: $e");
+    }
+  }
+
+  void _disconnect() {
+    _socket?.close();
     setState(() {
-      // This call to setState tells the Flutter framework that something has
-      // changed in this State, which causes it to rerun the build method below
-      // so that the display can reflect the updated values. If we changed
-      // _counter without calling setState(), then the build method would not be
-      // called again, and so nothing would appear to happen.
-      _counter++;
+      _isConnected = false;
+      _statusMessage = "Disconnected";
     });
+  }
+
+  void _sendCommand(Map<String, dynamic> command) {
+    if (_isConnected && _socket != null) {
+      final jsonStr = jsonEncode(command) + '\n';
+      _socket!.write(jsonStr);
+    }
+  }
+
+  void _onPanUpdate(DragUpdateDetails details) {
+    // details.delta gives us the dx and dy of the movement
+    _sendCommand({
+      "type": "MOUSE_MOVE",
+      "dx": details.delta.dx,
+      "dy": details.delta.dy,
+    });
+  }
+
+  void _onTap() {
+    _sendCommand({"type": "MOUSE_CLICK", "button": "left"});
+  }
+
+  void _sendText() {
+    final text = _textController.text;
+    if (text.isNotEmpty) {
+      _sendCommand({"type": "TYPE_TEXT", "text": text});
+      _textController.clear();
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    // This method is rerun every time setState is called, for instance as done
-    // by the _incrementCounter method above.
-    //
-    // The Flutter framework has been optimized to make rerunning build methods
-    // fast, so that you can just rebuild anything that needs updating rather
-    // than having to individually change instances of widgets.
     return Scaffold(
       appBar: AppBar(
-        // TRY THIS: Try changing the color here to a specific color (to
-        // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
-        // change color while the other colors stay the same.
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        // Here we take the value from the MyHomePage object that was created by
-        // the App.build method, and use it to set our appbar title.
-        title: Text(widget.title),
+        title: const Text('PC Media & Remote'),
+        actions: [
+          Icon(_isConnected ? Icons.wifi : Icons.wifi_off, 
+              color: _isConnected ? Colors.green : Colors.red),
+          const SizedBox(width: 16),
+        ],
       ),
-      body: Center(
-        // Center is a layout widget. It takes a single child and positions it
-        // in the middle of the parent.
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
         child: Column(
-          // Column is also a layout widget. It takes a list of children and
-          // arranges them vertically. By default, it sizes itself to fit its
-          // children horizontally, and tries to be as tall as its parent.
-          //
-          // Column has various properties to control how it sizes itself and
-          // how it positions its children. Here we use mainAxisAlignment to
-          // center the children vertically; the main axis here is the vertical
-          // axis because Columns are vertical (the cross axis would be
-          // horizontal).
-          //
-          // TRY THIS: Invoke "debug painting" (choose the "Toggle Debug Paint"
-          // action in the IDE, or press "p" in the console), to see the
-          // wireframe for each widget.
-          mainAxisAlignment: .center,
           children: [
-            const Text('You have pushed the button this many times:'),
-            Text(
-              '$_counter',
-              style: Theme.of(context).textTheme.headlineMedium,
+            // Connection Area
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _ipController,
+                    decoration: const InputDecoration(
+                      labelText: 'PC IP Address',
+                      hintText: 'e.g., 192.168.1.15',
+                      border: OutlineInputBorder(),
+                    ),
+                    keyboardType: TextInputType.numberWithOptions(decimal: true),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                ElevatedButton(
+                  onPressed: _isConnected ? _disconnect : _connectToServer,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _isConnected ? Colors.red : Colors.teal,
+                    padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 20),
+                  ),
+                  child: Text(_isConnected ? 'Disconnect' : 'Connect'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(_statusMessage, style: TextStyle(color: Colors.grey[400])),
+            const Divider(height: 30),
+
+            // Text Input Area
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _textController,
+                    decoration: const InputDecoration(
+                      labelText: 'Type to PC',
+                      border: OutlineInputBorder(),
+                    ),
+                    onSubmitted: (_) => _sendText(),
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.send, color: Colors.teal),
+                  onPressed: _sendText,
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+
+            // Touchpad Area
+            Expanded(
+              child: GestureDetector(
+                onPanUpdate: _onPanUpdate,
+                onTap: _onTap,
+                child: Container(
+                  width: double.infinity,
+                  decoration: BoxDecoration(
+                    color: Colors.black26,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: Colors.teal.withOpacity(0.5)),
+                  ),
+                  child: const Center(
+                    child: Text(
+                      'TOUCHPAD\n(Slide to move, Tap to left click)',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: Colors.white54, fontSize: 18),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // Click Buttons
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                ElevatedButton(
+                  onPressed: () => _sendCommand({"type": "MOUSE_CLICK", "button": "left"}),
+                  style: ElevatedButton.styleFrom(
+                    minimumSize: const Size(120, 60),
+                    backgroundColor: Colors.teal.shade700,
+                  ),
+                  child: const Text('Left Click'),
+                ),
+                ElevatedButton(
+                  onPressed: () => _sendCommand({"type": "MOUSE_CLICK", "button": "right"}),
+                  style: ElevatedButton.styleFrom(
+                    minimumSize: const Size(120, 60),
+                    backgroundColor: Colors.blueGrey.shade700,
+                  ),
+                  child: const Text('Right Click'),
+                ),
+              ],
             ),
           ],
         ),
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _incrementCounter,
-        tooltip: 'Increment',
-        child: const Icon(Icons.add),
       ),
     );
   }
