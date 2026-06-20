@@ -397,6 +397,32 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
     }
   }
 
+  String _lastText = "";
+
+  void _onTextChanged(String newText) {
+    if (newText == _lastText) return;
+
+    int commonLen = 0;
+    int minLen = newText.length < _lastText.length ? newText.length : _lastText.length;
+    while (commonLen < minLen && newText[commonLen] == _lastText[commonLen]) {
+      commonLen++;
+    }
+
+    // Send backspaces for characters removed from _lastText
+    int backspacesNeeded = _lastText.length - commonLen;
+    for (int i = 0; i < backspacesNeeded; i++) {
+      _sendCommand({"type": "SPECIAL_KEY", "key": "backspace"});
+    }
+
+    // Send new characters added in newText
+    String added = newText.substring(commonLen);
+    if (added.isNotEmpty) {
+      _sendCommand({"type": "TYPE_TEXT", "text": added});
+    }
+
+    _lastText = newText;
+  }
+
   // --- VOICE COMMAND ---
   void _startListening() async {
     if (!_isConnected) return;
@@ -596,20 +622,9 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
                   Expanded(
                     child: TextField(
                       controller: _textController,
-                      decoration: _modernInputDecoration('Type text to PC manually...'),
+                      decoration: _modernInputDecoration('Live Type to PC...'),
                       style: const TextStyle(color: Colors.white),
-                      onSubmitted: (_) => _sendText(),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Container(
-                    decoration: BoxDecoration(
-                      color: Colors.teal.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: IconButton(
-                      icon: const Icon(Icons.send_rounded, color: Colors.tealAccent),
-                      onPressed: _sendText,
+                      onChanged: _onTextChanged,
                     ),
                   ),
                 ],
