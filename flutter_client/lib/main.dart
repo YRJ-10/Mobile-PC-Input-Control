@@ -44,15 +44,14 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
   Socket? _socket;
   bool _isConnected = false;
   String _statusMessage = "Disconnected";
+  bool _isScanning = false;
 
   late stt.SpeechToText _speech;
   bool _isListening = false;
   String _lastRecognizedWords = "";
 
   static const platform = MethodChannel('com.mobilepcmedia/audio');
-
-  // Tab State: 0 untuk Touchpad, 1 untuk Media
-  int _currentPage = 0;
+  bool _isAudioEnabled = true;
 
   @override
   void initState() {
@@ -93,6 +92,51 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
     }
   }
 
+  // --- UDP DISCOVERY ---
+  void _scanNetwork() async {
+    setState(() => _isScanning = true);
+    try {
+      final udpSocket = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
+      udpSocket.broadcastEnabled = true;
+      
+      // Listen for response
+      udpSocket.listen((RawSocketEvent event) {
+        if (event == RawSocketEvent.read) {
+          Datagram? dg = udpSocket.receive();
+          if (dg != null) {
+            final message = utf8.decode(dg.data);
+            if (message == "MOBILEPC_SERVER") {
+              udpSocket.close();
+              if (mounted) {
+                setState(() {
+                  _ipController.text = dg.address.address;
+                  _isScanning = false;
+                });
+                _connectToServer();
+              }
+            }
+          }
+        }
+      });
+
+      // Broadcast to 255.255.255.255
+      udpSocket.send(utf8.encode("DISCOVER_MOBILEPC"), InternetAddress("255.255.255.255"), 8081);
+      
+      // Timeout after 3 seconds
+      Future.delayed(const Duration(seconds: 3), () {
+        if (_isScanning && mounted) {
+          udpSocket.close();
+          setState(() => _isScanning = false);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('PC not found. Make sure PC server is running.', style: TextStyle(color: Colors.white))),
+          );
+        }
+      });
+    } catch (e) {
+      if (mounted) setState(() => _isScanning = false);
+    }
+  }
+
   void _connectToServer() async {
     final ip = _ipController.text.trim();
     if (ip.isEmpty) return;
@@ -104,6 +148,7 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
 
       setState(() {
         _isConnected = true;
+        _isAudioEnabled = true;
         _statusMessage = "Connected to $ip";
       });
 
@@ -164,26 +209,58 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
     }
   }
 
+  void _toggleAudio() {
+    setState(() {
+      _isAudioEnabled = !_isAudioEnabled;
+    });
+    
+    // Kirim perintah ke server Python
+    _sendCommand({
+      "type": "AUDIO_TOGGLE",
+      "enabled": _isAudioEnabled,
+    });
+    
+    // Hidupkan/matikan receiver di Android native
+    if (_isAudioEnabled) {
+      _startNativeAudioReceiver();
+    } else {
+      _stopNativeAudioReceiver();
+    }
+  }
+
   // --- MOUSE CONTROLS ---
   double _accumulatedDx = 0;
   double _accumulatedDy = 0;
   DateTime _lastPanTime = DateTime.now();
 
-  void _onPanUpdate(DragUpdateDetails details) {
-    _accumulatedDx += details.delta.dx;
-    _accumulatedDy += details.delta.dy;
+  void _onPanUpdate(DragUpdateDetails details, BoxConstraints constraints) {
+    // Hidden Scroll Zone (25% di sisi kanan untuk ruang yang lebih lega)
+    if (details.localPosition.dx > constraints.maxWidth * 0.75) {
+      final now = DateTime.now();
+      if (now.difference(_lastPanTime).inMilliseconds >= 16) {
+        _sendCommand({
+          "type": "SCROLL",
+          "dy": details.delta.dy,
+        });
+        _lastPanTime = now;
+      }
+    } else {
+      // Normal Mouse Move
+      _accumulatedDx += details.delta.dx;
+      _accumulatedDy += details.delta.dy;
 
-    final now = DateTime.now();
-    if (now.difference(_lastPanTime).inMilliseconds >= 16) {
-      const double sensitivity = 2.5; 
-      _sendCommand({
-        "type": "MOUSE_MOVE",
-        "dx": _accumulatedDx * sensitivity,
-        "dy": _accumulatedDy * sensitivity,
-      });
-      _lastPanTime = now;
-      _accumulatedDx = 0;
-      _accumulatedDy = 0;
+      final now = DateTime.now();
+      if (now.difference(_lastPanTime).inMilliseconds >= 16) {
+        const double sensitivity = 4.0; // Sensitivitas dinaikkan agar jangkauan lebih jauh
+        _sendCommand({
+          "type": "MOUSE_MOVE",
+          "dx": _accumulatedDx * sensitivity,
+          "dy": _accumulatedDy * sensitivity,
+        });
+        _lastPanTime = now;
+        _accumulatedDx = 0;
+        _accumulatedDy = 0;
+      }
     }
   }
 
@@ -256,148 +333,17 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
     );
   }
 
-  // --- TAB 1: TOUCHPAD ---
-  Widget _buildTouchpadTab() {
-    return Column(
-      key: const ValueKey('touchpad'),
-      children: [
-        Expanded(
-          child: GestureDetector(
-            onPanUpdate: _onPanUpdate,
-            onTap: _onTap,
-            child: Container(
-              width: double.infinity,
-              decoration: BoxDecoration(
-                color: const Color(0xFF131520),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: Colors.teal.withOpacity(0.15), width: 1),
-              ),
-              child: Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(Icons.touch_app_rounded, color: Colors.white24, size: 48),
-                    const SizedBox(height: 12),
-                    const Text(
-                      'TOUCHPAD',
-                      style: TextStyle(color: Colors.white30, fontSize: 16, fontWeight: FontWeight.bold, letterSpacing: 2),
-                    ),
-                    const SizedBox(height: 4),
-                    const Text(
-                      'Slide to move • Tap to click',
-                      style: TextStyle(color: Colors.white24, fontSize: 12),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(height: 16),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-          children: [
-            Expanded(
-              child: ElevatedButton.icon(
-                onPressed: () => _sendCommand({"type": "MOUSE_CLICK", "button": "left"}),
-                icon: const Icon(Icons.mouse, size: 18),
-                label: const Text('Left Click'),
-                style: ElevatedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  backgroundColor: const Color(0xFF1A1D2D),
-                  foregroundColor: Colors.tealAccent,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                  side: BorderSide(color: Colors.teal.withOpacity(0.3), width: 1),
-                  elevation: 0,
-                ),
-              ),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: ElevatedButton.icon(
-                onPressed: () => _sendCommand({"type": "MOUSE_CLICK", "button": "right"}),
-                icon: const Icon(Icons.mouse, size: 18),
-                label: const Text('Right Click'),
-                style: ElevatedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  backgroundColor: const Color(0xFF1A1D2D),
-                  foregroundColor: Colors.white70,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                  side: const BorderSide(color: Colors.white24, width: 1),
-                  elevation: 0,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ],
-    );
-  }
-
-  // --- TAB 2: MEDIA & SCROLL ---
-  Widget _buildMediaTab() {
-    return Row(
-      key: const ValueKey('media'),
-      children: [
-        // Kiri: Play/Pause Button
-        Expanded(
-          flex: 1,
-          child: ElevatedButton.icon(
-            onPressed: () => _sendCommand({"type": "MEDIA", "action": "playpause"}),
-            icon: const Icon(Icons.play_circle_filled, size: 36),
-            label: const Text('Play\nPause', textAlign: TextAlign.center, style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF1A1D2D),
-              foregroundColor: Colors.tealAccent,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-              side: BorderSide(color: Colors.tealAccent.withOpacity(0.3), width: 1),
-              elevation: 0,
-            ),
-          ),
-        ),
-        const SizedBox(width: 16),
-        // Kanan: Giant Scroll Wheel
-        Expanded(
-          flex: 2,
-          child: GestureDetector(
-            onPanUpdate: (details) {
-              final now = DateTime.now();
-              if (now.difference(_lastPanTime).inMilliseconds >= 32) { // 30fps
-                _sendCommand({
-                  "type": "SCROLL",
-                  "dy": details.delta.dy, // Kirim murni delta, biar server yang kalikan
-                });
-                _lastPanTime = now;
-              }
-            },
-            child: Container(
-              decoration: BoxDecoration(
-                color: const Color(0xFF131520),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: Colors.teal.withOpacity(0.3), width: 2), // Border tegas
-              ),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.keyboard_double_arrow_up, color: Colors.white54, size: 40),
-                  const SizedBox(height: 16),
-                  Expanded(
-                    child: Center(
-                      child: RotatedBox(
-                        quarterTurns: 1,
-                        child: Icon(Icons.linear_scale, color: Colors.tealAccent.withOpacity(0.7), size: 60),
-                      ),
-                    ),
-                  ),
-                  const Text('GIANT SCROLL', style: TextStyle(color: Colors.tealAccent, fontSize: 14, fontWeight: FontWeight.bold, letterSpacing: 2)),
-                  const SizedBox(height: 16),
-                  const Icon(Icons.keyboard_double_arrow_down, color: Colors.white54, size: 40),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ],
+  // Helper Widget untuk Special Keys
+  Widget _specialKeyBtn(String label, String keyCmd) {
+    return Padding(
+      padding: const EdgeInsets.only(right: 8.0),
+      child: ActionChip(
+        label: Text(label, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)),
+        backgroundColor: const Color(0xFF1A1D2D),
+        side: BorderSide(color: Colors.teal.withOpacity(0.3), width: 1),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        onPressed: () => _sendCommand({"type": "SPECIAL_KEY", "key": keyCmd}),
+      ),
     );
   }
 
@@ -409,10 +355,39 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
         title: const Text('MobilePC', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 20)),
         actions: [
           if (_isConnected) ...[
-            const Icon(Icons.speaker_group, color: Colors.tealAccent, size: 20),
-            const SizedBox(width: 6),
-            const Center(child: Text('Audio ON', style: TextStyle(color: Colors.tealAccent, fontSize: 13, fontWeight: FontWeight.bold))),
-            const SizedBox(width: 16),
+            GestureDetector(
+              onTap: _toggleAudio,
+              child: Container(
+                margin: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                decoration: BoxDecoration(
+                  color: _isAudioEnabled ? Colors.teal.withOpacity(0.2) : Colors.redAccent.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: _isAudioEnabled ? Colors.tealAccent.withOpacity(0.5) : Colors.redAccent.withOpacity(0.5),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      _isAudioEnabled ? Icons.speaker_group : Icons.volume_off,
+                      color: _isAudioEnabled ? Colors.tealAccent : Colors.redAccent,
+                      size: 16,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      _isAudioEnabled ? 'Audio ON' : 'Audio OFF',
+                      style: TextStyle(
+                        color: _isAudioEnabled ? Colors.tealAccent : Colors.redAccent,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
           ],
           Icon(_isConnected ? Icons.wifi : Icons.wifi_off, 
               color: _isConnected ? Colors.greenAccent : Colors.redAccent, size: 24),
@@ -426,18 +401,32 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
           padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
           child: Column(
             children: [
-              // 1. Area IP Connect
+              // 1. Area IP Connect & Auto-Discovery
               Row(
                 children: [
                   Expanded(
                     child: TextField(
                       controller: _ipController,
-                      decoration: _modernInputDecoration('PC IP Address (e.g. 192.168.1.9)'),
+                      decoration: _modernInputDecoration('PC IP Address (Auto-Scan)'),
                       keyboardType: const TextInputType.numberWithOptions(decimal: true),
                       style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
                     ),
                   ),
-                  const SizedBox(width: 12),
+                  const SizedBox(width: 8),
+                  Container(
+                    decoration: BoxDecoration(
+                      color: Colors.teal.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: IconButton(
+                      icon: _isScanning 
+                        ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.tealAccent)) 
+                        : const Icon(Icons.search_rounded, color: Colors.tealAccent),
+                      onPressed: _isScanning ? null : _scanNetwork,
+                      tooltip: 'Auto-Discover PC',
+                    ),
+                  ),
+                  const SizedBox(width: 8),
                   ElevatedButton(
                     onPressed: _isConnected ? _confirmDisconnect : _connectToServer,
                     style: ElevatedButton.styleFrom(
@@ -462,7 +451,7 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
               ),
               const SizedBox(height: 20),
 
-              // 2. Area Type Text Manual
+              // 2. Area Type Text Manual & Special Keys
               Row(
                 children: [
                   Expanded(
@@ -485,6 +474,21 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
                     ),
                   ),
                 ],
+              ),
+              const SizedBox(height: 12),
+              
+              // Special Keys Row
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    _specialKeyBtn('Enter ↵', 'enter'),
+                    _specialKeyBtn('Bksp ⌫', 'backspace'),
+                    _specialKeyBtn('Win ❖', 'win'),
+                    _specialKeyBtn('Copy', 'copy'),
+                    _specialKeyBtn('Paste', 'paste'),
+                  ],
+                ),
               ),
               const SizedBox(height: 16),
 
@@ -526,75 +530,108 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
               ),
               const SizedBox(height: 20),
 
-              // 4. Area Multi-Tab Tipis
+              // 4. Area Touchpad (dengan Hidden Scroll Zone)
               Expanded(
-                child: Column(
-                  children: [
-                    // A. Header Tab Tipis
-                    Container(
-                      margin: const EdgeInsets.only(bottom: 12),
-                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF131520),
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: Colors.teal.withOpacity(0.2)),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          GestureDetector(
-                            onTap: () => setState(() => _currentPage = 0),
-                            child: AnimatedContainer(
-                              duration: const Duration(milliseconds: 200),
-                              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
-                              decoration: BoxDecoration(
-                                color: _currentPage == 0 ? Colors.teal.withOpacity(0.3) : Colors.transparent,
-                                borderRadius: BorderRadius.circular(16),
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    return GestureDetector(
+                      onPanUpdate: (details) => _onPanUpdate(details, constraints),
+                      onTap: _onTap,
+                      child: Container(
+                        width: double.infinity,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF131520),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: Colors.teal.withOpacity(0.15), width: 1),
+                        ),
+                        child: Stack(
+                          children: [
+                            // Konten Tengah
+                            Center(
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  const Icon(Icons.touch_app_rounded, color: Colors.white24, size: 48),
+                                  const SizedBox(height: 12),
+                                  const Text(
+                                    'TOUCHPAD',
+                                    style: TextStyle(color: Colors.white30, fontSize: 16, fontWeight: FontWeight.bold, letterSpacing: 2),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  const Text(
+                                    'Slide to move • Tap to click',
+                                    style: TextStyle(color: Colors.white24, fontSize: 12),
+                                  ),
+                                ],
                               ),
-                              child: Text(
-                                'Touchpad',
-                                style: TextStyle(
-                                  color: _currentPage == 0 ? Colors.tealAccent : Colors.white54,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 12,
+                            ),
+                            // Penanda visual halus untuk zona Scroll (25% paling kanan)
+                            Positioned(
+                              right: 0,
+                              top: 0,
+                              bottom: 0,
+                              width: constraints.maxWidth * 0.25,
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  border: Border(
+                                    left: BorderSide(color: Colors.white.withOpacity(0.05), width: 1),
+                                  ),
+                                  gradient: LinearGradient(
+                                    colors: [Colors.transparent, Colors.white.withOpacity(0.02)],
+                                  ),
+                                ),
+                                child: const Center(
+                                  child: Icon(Icons.unfold_more, color: Colors.white10, size: 30),
                                 ),
                               ),
                             ),
-                          ),
-                          GestureDetector(
-                            onTap: () => setState(() => _currentPage = 1),
-                            child: AnimatedContainer(
-                              duration: const Duration(milliseconds: 200),
-                              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
-                              decoration: BoxDecoration(
-                                color: _currentPage == 1 ? Colors.teal.withOpacity(0.3) : Colors.transparent,
-                                borderRadius: BorderRadius.circular(16),
-                              ),
-                              child: Text(
-                                'Media & Scroll',
-                                style: TextStyle(
-                                  color: _currentPage == 1 ? Colors.tealAccent : Colors.white54,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 12,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
-                    ),
-                    
-                    // B. Konten Tab Aktif
-                    Expanded(
-                      child: AnimatedSwitcher(
-                        duration: const Duration(milliseconds: 300),
-                        child: _currentPage == 0 ? _buildTouchpadTab() : _buildMediaTab(),
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                  ],
+                    );
+                  }
                 ),
               ),
+              const SizedBox(height: 16),
+
+              // 5. Click Buttons
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: () => _sendCommand({"type": "MOUSE_CLICK", "button": "left"}),
+                      icon: const Icon(Icons.mouse, size: 18),
+                      label: const Text('Left Click'),
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        backgroundColor: const Color(0xFF1A1D2D),
+                        foregroundColor: Colors.tealAccent,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        side: BorderSide(color: Colors.teal.withOpacity(0.3), width: 1),
+                        elevation: 0,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: () => _sendCommand({"type": "MOUSE_CLICK", "button": "right"}),
+                      icon: const Icon(Icons.mouse, size: 18),
+                      label: const Text('Right Click'),
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        backgroundColor: const Color(0xFF1A1D2D),
+                        foregroundColor: Colors.white70,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        side: const BorderSide(color: Colors.white24, width: 1),
+                        elevation: 0,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
             ],
           ),
         ),

@@ -23,8 +23,11 @@ class PCMediaServerApp:
         # Variabel State
         self.is_running = False
         self.server_socket = None
+        self.server_thread = None
+        self.audio_thread = None
         self.client_ip = None
         self.client_ip_lock = threading.Lock()
+        self.audio_enabled = True
         
         self.setup_ui()
         
@@ -87,8 +90,8 @@ class PCMediaServerApp:
                     with self.client_ip_lock:
                         target_ip = self.client_ip
                     
-                    # Hanya kirim suara jika server sedang berjalan dan HP sudah terkoneksi
-                    if target_ip and self.is_running:
+                    # Hanya kirim suara jika server sedang berjalan, HP sudah terkoneksi, dan audio toggle dihidupkan
+                    if target_ip and self.is_running and self.audio_enabled:
                         try:
                             udp_socket.sendto(data_int16.tobytes(), (target_ip, UDP_PORT))
                         except Exception:
@@ -110,7 +113,18 @@ class PCMediaServerApp:
             # Windows butuh angka yang besar untuk 1 'click' scroll (biasanya 120)
             # Kita kalikan dy dari Flutter dengan faktor pengali yang besar.
             dy = cmd.get("dy", 0)
-            pyautogui.scroll(int(dy * -60))
+            pyautogui.scroll(int(dy * 60)) # Arah dibalik menjadi positif
+        elif action_type == "AUDIO_TOGGLE":
+            self.audio_enabled = cmd.get("enabled", True)
+        elif action_type == "SPECIAL_KEY":
+            key = cmd.get("key", "")
+            if key:
+                if key == "copy":
+                    pyautogui.hotkey('ctrl', 'c')
+                elif key == "paste":
+                    pyautogui.hotkey('ctrl', 'v')
+                else:
+                    pyautogui.press(key)
         elif action_type == "MEDIA":
             action = cmd.get("action", "")
             if action == "playpause":
@@ -151,6 +165,22 @@ class PCMediaServerApp:
             if self.is_running:
                 self.update_status("Status: Menunggu Koneksi HP...", "#FFD600")
 
+    def discovery_listener(self):
+        udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        try:
+            udp_socket.bind(('', 8081))
+            while self.is_running:
+                data, addr = udp_socket.recvfrom(1024)
+                message = data.decode('utf-8', errors='ignore').strip()
+                if message == "DISCOVER_MOBILEPC":
+                    udp_socket.sendto(b"MOBILEPC_SERVER", addr)
+        except Exception:
+            pass
+        finally:
+            udp_socket.close()
+
     def server_loop(self):
         try:
             self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -183,6 +213,10 @@ class PCMediaServerApp:
         # Jalankan server jaringan di Thread agar tidak nge-hang
         self.network_thread = threading.Thread(target=self.server_loop, daemon=True)
         self.network_thread.start()
+        
+        # Jalankan UDP Discovery Listener
+        self.discovery_thread = threading.Thread(target=self.discovery_listener, daemon=True)
+        self.discovery_thread.start()
 
     def stop_server(self):
         self.is_running = False
