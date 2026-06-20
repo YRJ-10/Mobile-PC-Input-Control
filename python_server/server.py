@@ -127,6 +127,10 @@ class PCMediaServerApp:
                     pyautogui.keyDown('alt')
                     pyautogui.press('tab')
                     pyautogui.keyUp('alt')
+                elif key == "browserback":
+                    pyautogui.hotkey('alt', 'left')
+                elif key == "browserforward":
+                    pyautogui.hotkey('alt', 'right')
                 else:
                     pyautogui.press(key)
         elif action_type == "ZOOM":

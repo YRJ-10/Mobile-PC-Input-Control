@@ -228,100 +228,115 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
     }
   }
 
-<<<<<<< HEAD
-  // --- MOUSE & GESTURE CONTROLS ---
-=======
-  // --- MOUSE CONTROLS ---
->>>>>>> 3609f43ac92c7988b75a0c96b6780d2523f50de9
+  // --- TOUCHPAD GESTURE SYSTEM (Listener-based) ---
+  final Map<int, Offset> _pointerPositions = {};
+  final Map<int, Offset> _pointerStartPositions = {};
+  DateTime _pointerDownTime = DateTime.now();
+  int _peakPointerCount = 0; // Track max fingers seen during gesture
   double _accumulatedDx = 0;
   double _accumulatedDy = 0;
-  DateTime _lastPanTime = DateTime.now();
-  double _lastScale = 1.0;
+  DateTime _lastMoveTime = DateTime.now();
 
-<<<<<<< HEAD
-  void _onScaleStart(ScaleStartDetails details) {
-    _lastScale = 1.0;
+  void _onPointerDown(PointerDownEvent e) {
+    _pointerPositions[e.pointer] = e.localPosition;
+    _pointerStartPositions[e.pointer] = e.localPosition;
+    if (_pointerPositions.length == 1) {
+      _pointerDownTime = DateTime.now();
+      _peakPointerCount = 1;
+    }
+    // Update peak count whenever a new finger lands
+    if (_pointerPositions.length > _peakPointerCount) {
+      _peakPointerCount = _pointerPositions.length;
+    }
   }
 
-  void _onScaleUpdate(ScaleUpdateDetails details, BoxConstraints constraints) {
-    // Deteksi Pinch to Zoom jika scale berubah signifikan dari 1.0
-    if ((details.scale - 1.0).abs() > 0.05) {
-      final now = DateTime.now();
-      if (now.difference(_lastPanTime).inMilliseconds >= 64) {
-        double scaleDelta = details.scale - _lastScale;
-        if (scaleDelta.abs() > 0.02) {
-          _sendCommand({
-            "type": "ZOOM",
-            "delta": scaleDelta > 0 ? 1 : -1
-          });
-          _lastScale = details.scale;
-          _lastPanTime = now;
-        }
-      }
-    } else {
-      // Single Finger Mode
-      // Hidden Scroll Zone (25% di sisi kanan untuk ruang yang lebih lega)
-      if (details.localFocalPoint.dx > constraints.maxWidth * 0.75) {
-        final now = DateTime.now();
-        if (now.difference(_lastPanTime).inMilliseconds >= 16) {
-          _sendCommand({
-            "type": "SCROLL",
-            "dy": details.focalPointDelta.dy,
-          });
-          _lastPanTime = now;
-        }
-      } else {
-        // Normal Mouse Move
-        _accumulatedDx += details.focalPointDelta.dx;
-        _accumulatedDy += details.focalPointDelta.dy;
+  void _onPointerMove(PointerMoveEvent e) {
+    _pointerPositions[e.pointer] = e.localPosition;
 
-        final now = DateTime.now();
-        if (now.difference(_lastPanTime).inMilliseconds >= 16) {
-          const double sensitivity = 4.0; // Sensitivitas dinaikkan agar jangkauan lebih jauh
-          _sendCommand({
-            "type": "MOUSE_MOVE",
-            "dx": _accumulatedDx * sensitivity,
-            "dy": _accumulatedDy * sensitivity,
-          });
-          _lastPanTime = now;
-          _accumulatedDx = 0;
-          _accumulatedDy = 0;
-        }
-=======
-  void _onPanUpdate(DragUpdateDetails details, BoxConstraints constraints) {
-    // Hidden Scroll Zone (25% di sisi kanan untuk ruang yang lebih lega)
-    if (details.localPosition.dx > constraints.maxWidth * 0.75) {
+    if (_pointerPositions.length == 1) {
+      // Single finger = mouse move (selalu aktif selama hanya 1 jari)
+      _accumulatedDx += e.delta.dx;
+      _accumulatedDy += e.delta.dy;
       final now = DateTime.now();
-      if (now.difference(_lastPanTime).inMilliseconds >= 16) {
-        _sendCommand({
-          "type": "SCROLL",
-          "dy": details.delta.dy,
-        });
-        _lastPanTime = now;
-      }
-    } else {
-      // Normal Mouse Move
-      _accumulatedDx += details.delta.dx;
-      _accumulatedDy += details.delta.dy;
-
-      final now = DateTime.now();
-      if (now.difference(_lastPanTime).inMilliseconds >= 16) {
-        const double sensitivity = 4.0; // Sensitivitas dinaikkan agar jangkauan lebih jauh
+      if (now.difference(_lastMoveTime).inMilliseconds >= 16) {
+        const double sensitivity = 4.0;
         _sendCommand({
           "type": "MOUSE_MOVE",
           "dx": _accumulatedDx * sensitivity,
           "dy": _accumulatedDy * sensitivity,
         });
-        _lastPanTime = now;
+        _lastMoveTime = now;
         _accumulatedDx = 0;
         _accumulatedDy = 0;
->>>>>>> 3609f43ac92c7988b75a0c96b6780d2523f50de9
+      }
+    } else if (_pointerPositions.length >= 2) {
+      // 2-finger continuous smooth scroll
+      final now = DateTime.now();
+      if (now.difference(_lastMoveTime).inMilliseconds >= 16) {
+        // Gunakan delta dari event saat ini saja
+        final dy = e.delta.dy;
+        if (dy.abs() > 0.3) {
+          // 2-jari ke atas (dy < 0) = scroll ke bawah
+          // 2-jari ke bawah (dy > 0) = scroll ke atas
+          _sendCommand({"type": "SCROLL", "dy": -dy * 0.5});
+        }
+        _lastMoveTime = now;
       }
     }
   }
 
-  void _onTap() {
-    _sendCommand({"type": "MOUSE_CLICK", "button": "left"});
+  void _onPointerUp(PointerUpEvent e) {
+    final startPos = _pointerStartPositions[e.pointer];
+    final endPos = e.localPosition;
+    final duration = DateTime.now().difference(_pointerDownTime).inMilliseconds;
+
+    // Use _peakPointerCount so 2-finger tap is detected even if fingers lift separately
+    if (_peakPointerCount == 1 && startPos != null) {
+      final dx = endPos.dx - startPos.dx;
+      final dy = endPos.dy - startPos.dy;
+      final dist = (dx * dx + dy * dy);
+      if (dist < 400 && duration < 350) {
+        // 1-finger tap = Left Click
+        _sendCommand({"type": "MOUSE_CLICK", "button": "left"});
+      }
+    } else if (_peakPointerCount >= 2) {
+      // Hitung rata-rata delta dari semua jari
+      double avgDx = 0;
+      double avgDy = 0;
+      int count = 0;
+      for (final id in _pointerStartPositions.keys) {
+        final s = _pointerStartPositions[id];
+        final cur = _pointerPositions[id] ?? (id == e.pointer ? endPos : null);
+        if (s != null && cur != null) {
+          avgDx += cur.dx - s.dx;
+          avgDy += cur.dy - s.dy;
+          count++;
+        }
+      }
+      if (count > 0) { avgDx /= count; avgDy /= count; }
+      final dist = avgDx * avgDx + avgDy * avgDy;
+
+      if (dist < 500 && duration < 400) {
+        // 2-finger tap = Right Click (forgiving: wide time window)
+        _sendCommand({"type": "MOUSE_CLICK", "button": "right"});
+      } else if (dist >= 500) {
+        if (avgDx.abs() > avgDy.abs()) {
+          if (avgDx > 0) {
+            _sendCommand({"type": "SPECIAL_KEY", "key": "browserback"});
+          } else {
+            _sendCommand({"type": "SPECIAL_KEY", "key": "browserforward"});
+          }
+        }
+        // Scroll vertical sudah ditangani secara continuous di _onPointerMove
+      }
+    }
+
+    _pointerPositions.remove(e.pointer);
+    _pointerStartPositions.remove(e.pointer);
+    // Reset peak when all fingers are lifted
+    if (_pointerPositions.isEmpty) {
+      _peakPointerCount = 0;
+    }
   }
 
   void _sendText() {
@@ -389,16 +404,35 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
     );
   }
 
-  // Helper Widget untuk Special Keys
-  Widget _specialKeyBtn(String label, String keyCmd) {
+  Widget _specialKeyBtn(String label, IconData icon, String command) {
     return Padding(
-      padding: const EdgeInsets.only(right: 8.0),
-      child: ActionChip(
-        label: Text(label, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)),
-        backgroundColor: const Color(0xFF1A1D2D),
-        side: BorderSide(color: Colors.teal.withOpacity(0.3), width: 1),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        onPressed: () => _sendCommand({"type": "SPECIAL_KEY", "key": keyCmd}),
+      padding: const EdgeInsets.only(right: 12.0),
+      child: SizedBox(
+        height: 65,
+        width: 100, // Fixed width for bigger keyboard-like keys
+        child: ElevatedButton(
+          onPressed: () => _sendCommand({"type": "SPECIAL_KEY", "key": command}),
+          style: ElevatedButton.styleFrom(
+            padding: const EdgeInsets.all(4),
+            backgroundColor: const Color(0xFF1A1D2D),
+            foregroundColor: Colors.white,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            side: BorderSide(color: Colors.teal.withOpacity(0.3), width: 1),
+            elevation: 2,
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, size: 22, color: Colors.tealAccent),
+              const SizedBox(height: 2),
+              Text(
+                label,
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -408,7 +442,7 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
     return Scaffold(
       resizeToAvoidBottomInset: false,
       appBar: AppBar(
-        title: const Text('MobilePC', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 20)),
+        title: const Text('MobilePC Control', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 20)),
         actions: [
           if (_isConnected) ...[
             GestureDetector(
@@ -538,15 +572,12 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
                 scrollDirection: Axis.horizontal,
                 child: Row(
                   children: [
-<<<<<<< HEAD
-                    _specialKeyBtn('Alt+Tab 🔀', 'alttab'),
-=======
->>>>>>> 3609f43ac92c7988b75a0c96b6780d2523f50de9
-                    _specialKeyBtn('Enter ↵', 'enter'),
-                    _specialKeyBtn('Bksp ⌫', 'backspace'),
-                    _specialKeyBtn('Win ❖', 'win'),
-                    _specialKeyBtn('Copy', 'copy'),
-                    _specialKeyBtn('Paste', 'paste'),
+                    _specialKeyBtn('Alt+Tab', Icons.compare_arrows_rounded, 'alttab'),
+                    _specialKeyBtn('Enter', Icons.keyboard_return_rounded, 'enter'),
+                    _specialKeyBtn('Bksp', Icons.backspace_rounded, 'backspace'),
+                    _specialKeyBtn('Refresh', Icons.refresh_rounded, 'f5'),
+                    _specialKeyBtn('Copy', Icons.content_copy_rounded, 'copy'),
+                    _specialKeyBtn('Paste', Icons.content_paste_rounded, 'paste'),
                   ],
                 ),
               ),
@@ -594,14 +625,10 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
               Expanded(
                 child: LayoutBuilder(
                   builder: (context, constraints) {
-                    return GestureDetector(
-<<<<<<< HEAD
-                      onScaleStart: _onScaleStart,
-                      onScaleUpdate: (details) => _onScaleUpdate(details, constraints),
-=======
-                      onPanUpdate: (details) => _onPanUpdate(details, constraints),
->>>>>>> 3609f43ac92c7988b75a0c96b6780d2523f50de9
-                      onTap: _onTap,
+                    return Listener(
+                      onPointerDown: _onPointerDown,
+                      onPointerMove: _onPointerMove,
+                      onPointerUp: _onPointerUp,
                       child: Container(
                         width: double.infinity,
                         decoration: BoxDecoration(
@@ -609,92 +636,28 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
                           borderRadius: BorderRadius.circular(10),
                           border: Border.all(color: Colors.teal.withOpacity(0.15), width: 1),
                         ),
-                        child: Stack(
-                          children: [
-                            // Konten Tengah
-                            Center(
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  const Icon(Icons.touch_app_rounded, color: Colors.white24, size: 48),
-                                  const SizedBox(height: 12),
-                                  const Text(
-                                    'TOUCHPAD',
-                                    style: TextStyle(color: Colors.white30, fontSize: 16, fontWeight: FontWeight.bold, letterSpacing: 2),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  const Text(
-                                    'Slide to move • Tap to click',
-                                    style: TextStyle(color: Colors.white24, fontSize: 12),
-                                  ),
-                                ],
+                        child: Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const Icon(Icons.touch_app_rounded, color: Colors.white24, size: 48),
+                              const SizedBox(height: 12),
+                              const Text(
+                                'TOUCHPAD',
+                                style: TextStyle(color: Colors.white30, fontSize: 16, fontWeight: FontWeight.bold, letterSpacing: 2),
                               ),
-                            ),
-                            // Penanda visual halus untuk zona Scroll (25% paling kanan)
-                            Positioned(
-                              right: 0,
-                              top: 0,
-                              bottom: 0,
-                              width: constraints.maxWidth * 0.25,
-                              child: Container(
-                                decoration: BoxDecoration(
-                                  border: Border(
-                                    left: BorderSide(color: Colors.white.withOpacity(0.05), width: 1),
-                                  ),
-                                  gradient: LinearGradient(
-                                    colors: [Colors.transparent, Colors.white.withOpacity(0.02)],
-                                  ),
-                                ),
-                                child: const Center(
-                                  child: Icon(Icons.unfold_more, color: Colors.white10, size: 30),
-                                ),
+                              const SizedBox(height: 4),
+                              const Text(
+                                'Tap • 2-Finger Tap • 2-Finger Swipe',
+                                style: TextStyle(color: Colors.white24, fontSize: 12),
                               ),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
                       ),
                     );
                   }
                 ),
-              ),
-              const SizedBox(height: 16),
-
-              // 5. Click Buttons
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  Expanded(
-                    child: ElevatedButton.icon(
-                      onPressed: () => _sendCommand({"type": "MOUSE_CLICK", "button": "left"}),
-                      icon: const Icon(Icons.mouse, size: 18),
-                      label: const Text('Left Click'),
-                      style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        backgroundColor: const Color(0xFF1A1D2D),
-                        foregroundColor: Colors.tealAccent,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                        side: BorderSide(color: Colors.teal.withOpacity(0.3), width: 1),
-                        elevation: 0,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: ElevatedButton.icon(
-                      onPressed: () => _sendCommand({"type": "MOUSE_CLICK", "button": "right"}),
-                      icon: const Icon(Icons.mouse, size: 18),
-                      label: const Text('Right Click'),
-                      style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        backgroundColor: const Color(0xFF1A1D2D),
-                        foregroundColor: Colors.white70,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                        side: const BorderSide(color: Colors.white24, width: 1),
-                        elevation: 0,
-                      ),
-                    ),
-                  ),
-                ],
               ),
               const SizedBox(height: 10),
             ],
