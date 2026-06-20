@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:speech_to_text/speech_to_text.dart' as stt;
+import 'package:permission_handler/permission_handler.dart';
 
 void main() {
   runApp(const MobilePCMediaApp());
@@ -36,6 +38,25 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
   Socket? _socket;
   bool _isConnected = false;
   String _statusMessage = "Disconnected";
+
+  // Speech to Text
+  late stt.SpeechToText _speech;
+  bool _isListening = false;
+  String _lastRecognizedWords = "";
+
+  @override
+  void initState() {
+    super.initState();
+    _speech = stt.SpeechToText();
+    _requestMicrophonePermission();
+  }
+
+  Future<void> _requestMicrophonePermission() async {
+    var status = await Permission.microphone.status;
+    if (!status.isGranted) {
+      await Permission.microphone.request();
+    }
+  }
 
   @override
   void dispose() {
@@ -86,8 +107,8 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
     }
   }
 
+  // --- MOUSE CONTROLS ---
   void _onPanUpdate(DragUpdateDetails details) {
-    // Menambahkan multiplier agar pergerakan mouse lebih cepat dan tidak terasa lambat
     const double sensitivity = 2.5; 
     _sendCommand({
       "type": "MOUSE_MOVE",
@@ -106,6 +127,54 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
       _sendCommand({"type": "TYPE_TEXT", "text": text});
       _textController.clear();
     }
+  }
+
+  // --- VOICE COMMAND (Real-time Typing) ---
+  void _startListening() async {
+    if (!_isConnected) return;
+    
+    bool available = await _speech.initialize(
+      onStatus: (val) {
+        if (val == 'done' || val == 'notListening') {
+          setState(() => _isListening = false);
+        }
+      },
+      onError: (val) => print('onError: $val'),
+    );
+
+    if (available) {
+      setState(() {
+        _isListening = true;
+        _lastRecognizedWords = ""; // Reset setiap mulai
+      });
+      _speech.listen(
+        onResult: (val) {
+          String recognizedWords = val.recognizedWords;
+          
+          // Cari kata baru dengan membandingkan hasil sebelumnya
+          if (recognizedWords.startsWith(_lastRecognizedWords)) {
+            String newWords = recognizedWords.substring(_lastRecognizedWords.length);
+            if (newWords.isNotEmpty) {
+              // Kirim kata baru ke PC secara real-time
+              _sendCommand({"type": "TYPE_TEXT", "text": newWords});
+            }
+          } else {
+             // Jika entah kenapa stringnya beda, kita bisa fallback (agak kompleks untuk pyautogui).
+             // Tapi biasanya Google STT menambah kata di belakang.
+          }
+          
+          _lastRecognizedWords = recognizedWords;
+        },
+        listenMode: stt.ListenMode.dictation,
+      );
+    }
+  }
+
+  void _stopListening() {
+    _speech.stop();
+    setState(() {
+      _isListening = false;
+    });
   }
 
   @override
@@ -152,6 +221,37 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
             Text(_statusMessage, style: TextStyle(color: Colors.grey[400])),
             const Divider(height: 30),
 
+            // Voice Command Button
+            GestureDetector(
+              onLongPressStart: (_) => _startListening(),
+              onLongPressEnd: (_) => _stopListening(),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                height: 100,
+                width: double.infinity,
+                decoration: BoxDecoration(
+                  color: _isListening ? Colors.redAccent : Colors.teal.shade800,
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: _isListening 
+                    ? [BoxShadow(color: Colors.redAccent.withOpacity(0.6), blurRadius: 20, spreadRadius: 5)] 
+                    : [],
+                ),
+                child: Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.mic, size: 40, color: Colors.white),
+                      Text(
+                        _isListening ? 'Mendengarkan... (Lepas untuk stop)' : 'Tahan untuk Voice Command',
+                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+
             // Text Input Area
             Row(
               children: [
@@ -159,7 +259,7 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
                   child: TextField(
                     controller: _textController,
                     decoration: const InputDecoration(
-                      labelText: 'Type to PC',
+                      labelText: 'Type manually',
                       border: OutlineInputBorder(),
                     ),
                     onSubmitted: (_) => _sendText(),
