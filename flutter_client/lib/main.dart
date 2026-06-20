@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:permission_handler/permission_handler.dart';
+import 'package:sound_stream/sound_stream.dart';
 
 void main() {
   runApp(const MobilePCMediaApp());
@@ -44,11 +45,16 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
   bool _isListening = false;
   String _lastRecognizedWords = "";
 
+  // Audio Streaming Player
+  final PlayerStream _player = PlayerStream();
+  RawDatagramSocket? _udpSocket;
+
   @override
   void initState() {
     super.initState();
     _speech = stt.SpeechToText();
     _requestMicrophonePermission();
+    _initAudioPlayer();
   }
 
   Future<void> _requestMicrophonePermission() async {
@@ -58,9 +64,31 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
     }
   }
 
+  void _initAudioPlayer() async {
+    try {
+      // Inisialisasi pemutar PCM stream bawaan
+      await _player.initialize();
+      await _player.start();
+
+      // Mulai UDP Listener di port 8081 untuk menerima paket audio dari PC
+      _udpSocket = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 8081);
+      _udpSocket!.listen((RawSocketEvent e) {
+        Datagram? d = _udpSocket!.receive();
+        if (d != null) {
+          // data PCM 16-bit 16000Hz dituliskan ke dalam player stream
+          _player.writeChunk(d.data);
+        }
+      });
+    } catch (e) {
+      print("Error inisialisasi audio player: $e");
+    }
+  }
+
   @override
   void dispose() {
     _socket?.close();
+    _udpSocket?.close();
+    _player.stop();
     _ipController.dispose();
     _textController.dispose();
     super.dispose();
@@ -145,22 +173,17 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
     if (available) {
       setState(() {
         _isListening = true;
-        _lastRecognizedWords = ""; // Reset setiap mulai
+        _lastRecognizedWords = ""; 
       });
       _speech.listen(
         onResult: (val) {
           String recognizedWords = val.recognizedWords;
           
-          // Cari kata baru dengan membandingkan hasil sebelumnya
           if (recognizedWords.startsWith(_lastRecognizedWords)) {
             String newWords = recognizedWords.substring(_lastRecognizedWords.length);
             if (newWords.isNotEmpty) {
-              // Kirim kata baru ke PC secara real-time
               _sendCommand({"type": "TYPE_TEXT", "text": newWords});
             }
-          } else {
-             // Jika entah kenapa stringnya beda, kita bisa fallback (agak kompleks untuk pyautogui).
-             // Tapi biasanya Google STT menambah kata di belakang.
           }
           
           _lastRecognizedWords = recognizedWords;
