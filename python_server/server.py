@@ -40,8 +40,15 @@ class PCMediaServerApp:
         lbl_subtitle = tk.Label(self.root, text="Hubungkan HP Anda ke IP di bawah ini:", font=("Segoe UI", 11), bg="#1E1E2C", fg="#A0A0B5")
         lbl_subtitle.pack()
         
-        # Kotak Tampilan IP Address
-        local_ip = socket.gethostbyname(socket.gethostname())
+        # Kotak Tampilan IP Address (Mengambil IP Wi-Fi asli yang menghadap ke luar)
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            local_ip = s.getsockname()[0]
+            s.close()
+        except Exception:
+            local_ip = "127.0.0.1"
+            
         self.lbl_ip = tk.Label(self.root, text=f"{local_ip}", font=("Consolas", 24, "bold"), bg="#2B2B3C", fg="#00FF88", padx=20, pady=10)
         self.lbl_ip.pack(pady=15)
         

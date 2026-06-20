@@ -6,19 +6,24 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:flutter/services.dart';
 
 void main() {
-  runApp(const MobilePCMediaApp());
+  runApp(const MobilePCApp());
 }
 
-class MobilePCMediaApp extends StatelessWidget {
-  const MobilePCMediaApp({super.key});
+class MobilePCApp extends StatelessWidget {
+  const MobilePCApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'PC Remote Control',
+      title: 'MobilePC',
+      debugShowCheckedModeBanner: false,
       theme: ThemeData.dark().copyWith(
-        primaryColor: Colors.teal,
-        scaffoldBackgroundColor: const Color(0xFF1E1E2C),
+        primaryColor: Colors.tealAccent,
+        scaffoldBackgroundColor: const Color(0xFF0F111A),
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Color(0xFF0F111A),
+          elevation: 0,
+        ),
       ),
       home: const RemoteHomePage(),
     );
@@ -40,12 +45,10 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
   bool _isConnected = false;
   String _statusMessage = "Disconnected";
 
-  // Speech to Text
   late stt.SpeechToText _speech;
   bool _isListening = false;
   String _lastRecognizedWords = "";
 
-  // Platform Channel untuk Low Latency Native Audio
   static const platform = MethodChannel('com.mobilepcmedia/audio');
 
   @override
@@ -75,7 +78,7 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
     try {
       await platform.invokeMethod('startAudioReceiver');
     } on PlatformException catch (e) {
-      print("Gagal memulai Native Audio: '${e.message}'.");
+      print("Failed to start Native Audio: '${e.message}'.");
     }
   }
 
@@ -83,7 +86,7 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
     try {
       await platform.invokeMethod('stopAudioReceiver');
     } on PlatformException catch (e) {
-      print("Gagal menghentikan Native Audio: '${e.message}'.");
+      print("Failed to stop Native Audio: '${e.message}'.");
     }
   }
 
@@ -94,8 +97,6 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
     try {
       setState(() => _statusMessage = "Connecting...");
       _socket = await Socket.connect(ip, 8080, timeout: const Duration(seconds: 5));
-      
-      // Matikan Nagle's Algorithm agar perintah langsung dikirim tanpa delay
       _socket!.setOption(SocketOption.tcpNoDelay, true);
 
       setState(() {
@@ -103,17 +104,12 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
         _statusMessage = "Connected to $ip";
       });
 
-      // Mulai jalankan Audio Receiver di Native Kotlin (Bypass Flutter)
       _startNativeAudioReceiver();
 
       _socket!.listen(
         (data) {},
-        onError: (error) {
-          _disconnect();
-        },
-        onDone: () {
-          _disconnect();
-        },
+        onError: (error) => _disconnect(),
+        onDone: () => _disconnect(),
       );
     } catch (e) {
       setState(() => _statusMessage = "Connection failed: $e");
@@ -127,6 +123,35 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
       _isConnected = false;
       _statusMessage = "Disconnected";
     });
+  }
+
+  void _confirmDisconnect() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1E1E2C),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        title: const Text('Disconnect?', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        content: const Text('Are you sure you want to disconnect from the PC?', style: TextStyle(color: Colors.white70)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.redAccent, 
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            onPressed: () {
+              Navigator.pop(ctx);
+              _disconnect();
+            },
+            child: const Text('Disconnect', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
   }
 
   void _sendCommand(Map<String, dynamic> command) {
@@ -146,7 +171,6 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
     _accumulatedDy += details.delta.dy;
 
     final now = DateTime.now();
-    // Throttling 60 FPS
     if (now.difference(_lastPanTime).inMilliseconds >= 16) {
       const double sensitivity = 2.5; 
       _sendCommand({
@@ -169,13 +193,13 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
     if (text.isNotEmpty) {
       _sendCommand({"type": "TYPE_TEXT", "text": text});
       _textController.clear();
+      FocusScope.of(context).unfocus(); // Menutup keyboard setelah send
     }
   }
 
-  // --- VOICE COMMAND (Real-time Typing) ---
+  // --- VOICE COMMAND ---
   void _startListening() async {
     if (!_isConnected) return;
-    
     bool available = await _speech.initialize(
       onStatus: (val) {
         if (val == 'done' || val == 'notListening') {
@@ -193,14 +217,12 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
       _speech.listen(
         onResult: (val) {
           String recognizedWords = val.recognizedWords;
-          
           if (recognizedWords.startsWith(_lastRecognizedWords)) {
             String newWords = recognizedWords.substring(_lastRecognizedWords.length);
             if (newWords.isNotEmpty) {
               _sendCommand({"type": "TYPE_TEXT", "text": newWords});
             }
           }
-          
           _lastRecognizedWords = recognizedWords;
         },
         listenMode: stt.ListenMode.dictation,
@@ -210,154 +232,228 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
 
   void _stopListening() {
     _speech.stop();
-    setState(() {
-      _isListening = false;
-    });
+    setState(() => _isListening = false);
+  }
+
+  InputDecoration _modernInputDecoration(String label) {
+    return InputDecoration(
+      labelText: label,
+      labelStyle: const TextStyle(color: Colors.grey),
+      filled: true,
+      fillColor: const Color(0xFF1A1D2D),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(10),
+        borderSide: BorderSide.none,
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(10),
+        borderSide: const BorderSide(color: Colors.tealAccent, width: 1.5),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      resizeToAvoidBottomInset: false, // Mencegah overflow saat keyboard muncul
       appBar: AppBar(
-        title: const Text('PC Media & Remote'),
+        title: const Text('MobilePC', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 20)),
         actions: [
+          if (_isConnected) ...[
+            const Icon(Icons.speaker_group, color: Colors.tealAccent, size: 20),
+            const SizedBox(width: 6),
+            const Center(child: Text('Audio ON', style: TextStyle(color: Colors.tealAccent, fontSize: 13, fontWeight: FontWeight.bold))),
+            const SizedBox(width: 16),
+          ],
           Icon(_isConnected ? Icons.wifi : Icons.wifi_off, 
-              color: _isConnected ? Colors.green : Colors.red),
+              color: _isConnected ? Colors.greenAccent : Colors.redAccent, size: 24),
           const SizedBox(width: 16),
         ],
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          children: [
-            // Connection Area
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _ipController,
-                    decoration: const InputDecoration(
-                      labelText: 'PC IP Address',
-                      hintText: 'e.g., 192.168.1.15',
-                      border: OutlineInputBorder(),
+      // Membungkus body dengan GestureDetector agar bisa unfocus saat klik di luar area text field
+      body: GestureDetector(
+        onTap: () => FocusScope.of(context).unfocus(),
+        behavior: HitTestBehavior.translucent,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+          child: Column(
+            children: [
+              // Area Koneksi
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _ipController,
+                      decoration: _modernInputDecoration('PC IP Address (e.g. 192.168.1.9)'),
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
                     ),
-                    keyboardType: TextInputType.numberWithOptions(decimal: true),
                   ),
-                ),
-                const SizedBox(width: 10),
-                ElevatedButton(
-                  onPressed: _isConnected ? _disconnect : _connectToServer,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: _isConnected ? Colors.red : Colors.teal,
-                    padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 20),
+                  const SizedBox(width: 12),
+                  ElevatedButton(
+                    onPressed: _isConnected ? _confirmDisconnect : _connectToServer,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _isConnected ? const Color(0xFF2A1515) : Colors.teal.shade700,
+                      foregroundColor: _isConnected ? Colors.redAccent : Colors.white,
+                      side: BorderSide(color: _isConnected ? Colors.redAccent : Colors.tealAccent, width: 1),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
+                      elevation: 0,
+                    ),
+                    child: Text(
+                      _isConnected ? 'Disconnect' : 'Connect',
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                    ),
                   ),
-                  child: Text(_isConnected ? 'Disconnect' : 'Connect'),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Text(_statusMessage, style: TextStyle(color: Colors.grey[400])),
-            const Divider(height: 30),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(_statusMessage, style: TextStyle(color: _isConnected ? Colors.greenAccent : Colors.grey[500], fontSize: 12)),
+              ),
+              const SizedBox(height: 20),
 
-            // Voice Command Button
-            GestureDetector(
-              onLongPressStart: (_) => _startListening(),
-              onLongPressEnd: (_) => _stopListening(),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                height: 100,
-                width: double.infinity,
-                decoration: BoxDecoration(
-                  color: _isListening ? Colors.redAccent : Colors.teal.shade800,
-                  borderRadius: BorderRadius.circular(16),
-                  boxShadow: _isListening 
-                    ? [BoxShadow(color: Colors.redAccent.withOpacity(0.6), blurRadius: 20, spreadRadius: 5)] 
-                    : [],
-                ),
-                child: Center(
-                  child: Column(
+              // Text Input 
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _textController,
+                      decoration: _modernInputDecoration('Type text to PC manually...'),
+                      style: const TextStyle(color: Colors.white),
+                      onSubmitted: (_) => _sendText(),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Container(
+                    decoration: BoxDecoration(
+                      color: Colors.teal.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: IconButton(
+                      icon: const Icon(Icons.send_rounded, color: Colors.tealAccent),
+                      onPressed: _sendText,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+
+              // Voice Command (Diperbesar Vertikal)
+              GestureDetector(
+                onLongPressStart: (_) => _startListening(),
+                onLongPressEnd: (_) => _stopListening(),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  height: 120, // Tinggi ditambah
+                  width: double.infinity,
+                  decoration: BoxDecoration(
+                    color: _isListening ? Colors.redAccent.withOpacity(0.9) : const Color(0xFF1A1D2D),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: _isListening ? Colors.redAccent : Colors.teal.withOpacity(0.3), 
+                      width: 1.5
+                    ),
+                    boxShadow: _isListening 
+                      ? [BoxShadow(color: Colors.redAccent.withOpacity(0.4), blurRadius: 15, spreadRadius: 0)] 
+                      : [],
+                  ),
+                  child: Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(Icons.mic, size: 40, color: Colors.white),
+                      Icon(Icons.mic_rounded, size: 40, color: _isListening ? Colors.white : Colors.tealAccent), // Ikon sedikit diperbesar
+                      const SizedBox(width: 12),
                       Text(
-                        _isListening ? 'Mendengarkan... (Lepas untuk stop)' : 'Tahan untuk Voice Command',
-                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                        _isListening ? 'Listening... (Release to Stop)' : 'Hold for Voice Command',
+                        style: TextStyle(
+                          color: _isListening ? Colors.white : Colors.white70, 
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                        ),
                       ),
                     ],
                   ),
                 ),
               ),
-            ),
-            const SizedBox(height: 20),
+              const SizedBox(height: 20),
 
-            // Text Input Area
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _textController,
-                    decoration: const InputDecoration(
-                      labelText: 'Type manually',
-                      border: OutlineInputBorder(),
+              // Touchpad Area
+              Expanded(
+                child: GestureDetector(
+                  onPanUpdate: _onPanUpdate,
+                  onTap: _onTap,
+                  child: Container(
+                    width: double.infinity,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF131520),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: Colors.teal.withOpacity(0.15), width: 1),
                     ),
-                    onSubmitted: (_) => _sendText(),
-                  ),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.send, color: Colors.teal),
-                  onPressed: _sendText,
-                ),
-              ],
-            ),
-            const SizedBox(height: 20),
-
-            // Touchpad Area
-            Expanded(
-              child: GestureDetector(
-                onPanUpdate: _onPanUpdate,
-                onTap: _onTap,
-                child: Container(
-                  width: double.infinity,
-                  decoration: BoxDecoration(
-                    color: Colors.black26,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: Colors.teal.withOpacity(0.5)),
-                  ),
-                  child: const Center(
-                    child: Text(
-                      'TOUCHPAD\n(Slide to move, Tap to left click)',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: Colors.white54, fontSize: 18),
+                    child: Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.touch_app_rounded, color: Colors.white24, size: 48),
+                          const SizedBox(height: 12),
+                          const Text(
+                            'TOUCHPAD',
+                            style: TextStyle(color: Colors.white30, fontSize: 16, fontWeight: FontWeight.bold, letterSpacing: 2),
+                          ),
+                          const SizedBox(height: 4),
+                          const Text(
+                            'Slide to move • Tap to click',
+                            style: TextStyle(color: Colors.white24, fontSize: 12),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
               ),
-            ),
-            const SizedBox(height: 16),
+              const SizedBox(height: 16),
 
-            // Click Buttons
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: [
-                ElevatedButton(
-                  onPressed: () => _sendCommand({"type": "MOUSE_CLICK", "button": "left"}),
-                  style: ElevatedButton.styleFrom(
-                    minimumSize: const Size(120, 60),
-                    backgroundColor: Colors.teal.shade700,
+              // Click Buttons
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: () => _sendCommand({"type": "MOUSE_CLICK", "button": "left"}),
+                      icon: const Icon(Icons.mouse, size: 18),
+                      label: const Text('Left Click'),
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        backgroundColor: const Color(0xFF1A1D2D),
+                        foregroundColor: Colors.tealAccent,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        side: BorderSide(color: Colors.teal.withOpacity(0.3), width: 1),
+                        elevation: 0,
+                      ),
+                    ),
                   ),
-                  child: const Text('Left Click'),
-                ),
-                ElevatedButton(
-                  onPressed: () => _sendCommand({"type": "MOUSE_CLICK", "button": "right"}),
-                  style: ElevatedButton.styleFrom(
-                    minimumSize: const Size(120, 60),
-                    backgroundColor: Colors.blueGrey.shade700,
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: () => _sendCommand({"type": "MOUSE_CLICK", "button": "right"}),
+                      icon: const Icon(Icons.mouse, size: 18),
+                      label: const Text('Right Click'),
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        backgroundColor: const Color(0xFF1A1D2D),
+                        foregroundColor: Colors.white70,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        side: const BorderSide(color: Colors.white24, width: 1),
+                        elevation: 0,
+                      ),
+                    ),
                   ),
-                  child: const Text('Right Click'),
-                ),
-              ],
-            ),
-          ],
+                ],
+              ),
+              const SizedBox(height: 10),
+            ],
+          ),
         ),
       ),
     );
