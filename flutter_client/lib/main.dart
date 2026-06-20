@@ -51,6 +51,9 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
 
   static const platform = MethodChannel('com.mobilepcmedia/audio');
 
+  // Tab State: 0 untuk Touchpad, 1 untuk Media
+  int _currentPage = 0;
+
   @override
   void initState() {
     super.initState();
@@ -78,7 +81,7 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
     try {
       await platform.invokeMethod('startAudioReceiver');
     } on PlatformException catch (e) {
-      print("Failed to start Native Audio: '${e.message}'.");
+      debugPrint("Failed to start Native Audio: '${e.message}'.");
     }
   }
 
@@ -86,7 +89,7 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
     try {
       await platform.invokeMethod('stopAudioReceiver');
     } on PlatformException catch (e) {
-      print("Failed to stop Native Audio: '${e.message}'.");
+      debugPrint("Failed to stop Native Audio: '${e.message}'.");
     }
   }
 
@@ -193,7 +196,7 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
     if (text.isNotEmpty) {
       _sendCommand({"type": "TYPE_TEXT", "text": text});
       _textController.clear();
-      FocusScope.of(context).unfocus(); // Menutup keyboard setelah send
+      FocusScope.of(context).unfocus();
     }
   }
 
@@ -206,7 +209,7 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
           setState(() => _isListening = false);
         }
       },
-      onError: (val) => print('onError: $val'),
+      onError: (val) => debugPrint('onError: $val'),
     );
 
     if (available) {
@@ -253,10 +256,155 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
     );
   }
 
+  // --- TAB 1: TOUCHPAD ---
+  Widget _buildTouchpadTab() {
+    return Column(
+      key: const ValueKey('touchpad'),
+      children: [
+        Expanded(
+          child: GestureDetector(
+            onPanUpdate: _onPanUpdate,
+            onTap: _onTap,
+            child: Container(
+              width: double.infinity,
+              decoration: BoxDecoration(
+                color: const Color(0xFF131520),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: Colors.teal.withOpacity(0.15), width: 1),
+              ),
+              child: Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(Icons.touch_app_rounded, color: Colors.white24, size: 48),
+                    const SizedBox(height: 12),
+                    const Text(
+                      'TOUCHPAD',
+                      style: TextStyle(color: Colors.white30, fontSize: 16, fontWeight: FontWeight.bold, letterSpacing: 2),
+                    ),
+                    const SizedBox(height: 4),
+                    const Text(
+                      'Slide to move • Tap to click',
+                      style: TextStyle(color: Colors.white24, fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: [
+            Expanded(
+              child: ElevatedButton.icon(
+                onPressed: () => _sendCommand({"type": "MOUSE_CLICK", "button": "left"}),
+                icon: const Icon(Icons.mouse, size: 18),
+                label: const Text('Left Click'),
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  backgroundColor: const Color(0xFF1A1D2D),
+                  foregroundColor: Colors.tealAccent,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  side: BorderSide(color: Colors.teal.withOpacity(0.3), width: 1),
+                  elevation: 0,
+                ),
+              ),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: ElevatedButton.icon(
+                onPressed: () => _sendCommand({"type": "MOUSE_CLICK", "button": "right"}),
+                icon: const Icon(Icons.mouse, size: 18),
+                label: const Text('Right Click'),
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  backgroundColor: const Color(0xFF1A1D2D),
+                  foregroundColor: Colors.white70,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  side: const BorderSide(color: Colors.white24, width: 1),
+                  elevation: 0,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  // --- TAB 2: MEDIA & SCROLL ---
+  Widget _buildMediaTab() {
+    return Row(
+      key: const ValueKey('media'),
+      children: [
+        // Kiri: Play/Pause Button
+        Expanded(
+          flex: 1,
+          child: ElevatedButton.icon(
+            onPressed: () => _sendCommand({"type": "MEDIA", "action": "playpause"}),
+            icon: const Icon(Icons.play_circle_filled, size: 36),
+            label: const Text('Play\nPause', textAlign: TextAlign.center, style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF1A1D2D),
+              foregroundColor: Colors.tealAccent,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              side: BorderSide(color: Colors.tealAccent.withOpacity(0.3), width: 1),
+              elevation: 0,
+            ),
+          ),
+        ),
+        const SizedBox(width: 16),
+        // Kanan: Giant Scroll Wheel
+        Expanded(
+          flex: 2,
+          child: GestureDetector(
+            onPanUpdate: (details) {
+              final now = DateTime.now();
+              if (now.difference(_lastPanTime).inMilliseconds >= 32) { // 30fps
+                _sendCommand({
+                  "type": "SCROLL",
+                  "dy": details.delta.dy, // Kirim murni delta, biar server yang kalikan
+                });
+                _lastPanTime = now;
+              }
+            },
+            child: Container(
+              decoration: BoxDecoration(
+                color: const Color(0xFF131520),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: Colors.teal.withOpacity(0.3), width: 2), // Border tegas
+              ),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.keyboard_double_arrow_up, color: Colors.white54, size: 40),
+                  const SizedBox(height: 16),
+                  Expanded(
+                    child: Center(
+                      child: RotatedBox(
+                        quarterTurns: 1,
+                        child: Icon(Icons.linear_scale, color: Colors.tealAccent.withOpacity(0.7), size: 60),
+                      ),
+                    ),
+                  ),
+                  const Text('GIANT SCROLL', style: TextStyle(color: Colors.tealAccent, fontSize: 14, fontWeight: FontWeight.bold, letterSpacing: 2)),
+                  const SizedBox(height: 16),
+                  const Icon(Icons.keyboard_double_arrow_down, color: Colors.white54, size: 40),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      resizeToAvoidBottomInset: false, // Mencegah overflow saat keyboard muncul
+      resizeToAvoidBottomInset: false,
       appBar: AppBar(
         title: const Text('MobilePC', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 20)),
         actions: [
@@ -271,7 +419,6 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
           const SizedBox(width: 16),
         ],
       ),
-      // Membungkus body dengan GestureDetector agar bisa unfocus saat klik di luar area text field
       body: GestureDetector(
         onTap: () => FocusScope.of(context).unfocus(),
         behavior: HitTestBehavior.translucent,
@@ -279,7 +426,7 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
           padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
           child: Column(
             children: [
-              // Area Koneksi
+              // 1. Area IP Connect
               Row(
                 children: [
                   Expanded(
@@ -315,7 +462,7 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
               ),
               const SizedBox(height: 20),
 
-              // Text Input 
+              // 2. Area Type Text Manual
               Row(
                 children: [
                   Expanded(
@@ -341,13 +488,13 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
               ),
               const SizedBox(height: 16),
 
-              // Voice Command (Diperbesar Vertikal)
+              // 3. Voice Command Raksasa
               GestureDetector(
                 onLongPressStart: (_) => _startListening(),
                 onLongPressEnd: (_) => _stopListening(),
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 200),
-                  height: 120, // Tinggi ditambah
+                  height: 120,
                   width: double.infinity,
                   decoration: BoxDecoration(
                     color: _isListening ? Colors.redAccent.withOpacity(0.9) : const Color(0xFF1A1D2D),
@@ -363,7 +510,7 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(Icons.mic_rounded, size: 40, color: _isListening ? Colors.white : Colors.tealAccent), // Ikon sedikit diperbesar
+                      Icon(Icons.mic_rounded, size: 40, color: _isListening ? Colors.white : Colors.tealAccent),
                       const SizedBox(width: 12),
                       Text(
                         _isListening ? 'Listening... (Release to Stop)' : 'Hold for Voice Command',
@@ -379,79 +526,75 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
               ),
               const SizedBox(height: 20),
 
-              // Touchpad Area
+              // 4. Area Multi-Tab Tipis
               Expanded(
-                child: GestureDetector(
-                  onPanUpdate: _onPanUpdate,
-                  onTap: _onTap,
-                  child: Container(
-                    width: double.infinity,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF131520),
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: Colors.teal.withOpacity(0.15), width: 1),
-                    ),
-                    child: Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
+                child: Column(
+                  children: [
+                    // A. Header Tab Tipis
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 12),
+                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF131520),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: Colors.teal.withOpacity(0.2)),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(Icons.touch_app_rounded, color: Colors.white24, size: 48),
-                          const SizedBox(height: 12),
-                          const Text(
-                            'TOUCHPAD',
-                            style: TextStyle(color: Colors.white30, fontSize: 16, fontWeight: FontWeight.bold, letterSpacing: 2),
+                          GestureDetector(
+                            onTap: () => setState(() => _currentPage = 0),
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 200),
+                              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+                              decoration: BoxDecoration(
+                                color: _currentPage == 0 ? Colors.teal.withOpacity(0.3) : Colors.transparent,
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                              child: Text(
+                                'Touchpad',
+                                style: TextStyle(
+                                  color: _currentPage == 0 ? Colors.tealAccent : Colors.white54,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ),
                           ),
-                          const SizedBox(height: 4),
-                          const Text(
-                            'Slide to move • Tap to click',
-                            style: TextStyle(color: Colors.white24, fontSize: 12),
+                          GestureDetector(
+                            onTap: () => setState(() => _currentPage = 1),
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 200),
+                              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+                              decoration: BoxDecoration(
+                                color: _currentPage == 1 ? Colors.teal.withOpacity(0.3) : Colors.transparent,
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                              child: Text(
+                                'Media & Scroll',
+                                style: TextStyle(
+                                  color: _currentPage == 1 ? Colors.tealAccent : Colors.white54,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ),
                           ),
                         ],
                       ),
                     ),
-                  ),
+                    
+                    // B. Konten Tab Aktif
+                    Expanded(
+                      child: AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 300),
+                        child: _currentPage == 0 ? _buildTouchpadTab() : _buildMediaTab(),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                  ],
                 ),
               ),
-              const SizedBox(height: 16),
-
-              // Click Buttons
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  Expanded(
-                    child: ElevatedButton.icon(
-                      onPressed: () => _sendCommand({"type": "MOUSE_CLICK", "button": "left"}),
-                      icon: const Icon(Icons.mouse, size: 18),
-                      label: const Text('Left Click'),
-                      style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        backgroundColor: const Color(0xFF1A1D2D),
-                        foregroundColor: Colors.tealAccent,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                        side: BorderSide(color: Colors.teal.withOpacity(0.3), width: 1),
-                        elevation: 0,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: ElevatedButton.icon(
-                      onPressed: () => _sendCommand({"type": "MOUSE_CLICK", "button": "right"}),
-                      icon: const Icon(Icons.mouse, size: 18),
-                      label: const Text('Right Click'),
-                      style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        backgroundColor: const Color(0xFF1A1D2D),
-                        foregroundColor: Colors.white70,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                        side: const BorderSide(color: Colors.white24, width: 1),
-                        elevation: 0,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 10),
             ],
           ),
         ),

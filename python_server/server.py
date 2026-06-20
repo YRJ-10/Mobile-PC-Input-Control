@@ -106,6 +106,18 @@ class PCMediaServerApp:
             text = cmd.get("text", "")
             if text:
                 pyautogui.write(text, interval=0.01)
+        elif action_type == "SCROLL":
+            # Windows butuh angka yang besar untuk 1 'click' scroll (biasanya 120)
+            # Kita kalikan dy dari Flutter dengan faktor pengali yang besar.
+            dy = cmd.get("dy", 0)
+            pyautogui.scroll(int(dy * -60))
+        elif action_type == "MEDIA":
+            action = cmd.get("action", "")
+            if action == "playpause":
+                import ctypes
+                VK_MEDIA_PLAY_PAUSE = 0xB3
+                ctypes.windll.user32.keybd_event(VK_MEDIA_PLAY_PAUSE, 0, 0, 0) # Key Down
+                ctypes.windll.user32.keybd_event(VK_MEDIA_PLAY_PAUSE, 0, 2, 0) # Key Up
 
     def handle_client(self, conn, addr):
         self.update_status(f"HP Terhubung: {addr[0]}", "#00E5FF")
