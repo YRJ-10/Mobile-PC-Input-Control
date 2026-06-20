@@ -34,10 +34,10 @@ def audio_streamer():
             
         print(f"[*] Audio streamer siap merekam dari: {loopback_mic.name}")
         
-        # Merekam dengan 16000Hz (Cukup untuk suara/film dan ringan di jaringan)
+        # Merekam dengan 16000Hz. Menggunakan frame 256 (sangat kecil, ~16ms) agar delay audio hampir 0.
         with loopback_mic.recorder(samplerate=16000, channels=1) as mic:
             while True:
-                data = mic.record(numframes=1024)
+                data = mic.record(numframes=256)
                 # Konversi data float32 dari soundcard ke int16 (standar PCM untuk Android)
                 data_int16 = (data * 32767).astype(np.int16)
                 

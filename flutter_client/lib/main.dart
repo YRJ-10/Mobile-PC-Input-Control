@@ -101,6 +101,10 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
     try {
       setState(() => _statusMessage = "Connecting...");
       _socket = await Socket.connect(ip, 8080, timeout: const Duration(seconds: 5));
+      
+      // MENGHILANGKAN DELAY: Matikan Nagle's Algorithm agar perintah langsung dikirim
+      _socket!.setOption(SocketOption.tcpNoDelay, true);
+
       setState(() {
         _isConnected = true;
         _statusMessage = "Connected to $ip";
@@ -135,14 +139,30 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
     }
   }
 
+  // Variabel untuk menampung pergerakan agar tidak spam
+  double _accumulatedDx = 0;
+  double _accumulatedDy = 0;
+  DateTime _lastPanTime = DateTime.now();
+
   // --- MOUSE CONTROLS ---
   void _onPanUpdate(DragUpdateDetails details) {
-    const double sensitivity = 2.5; 
-    _sendCommand({
-      "type": "MOUSE_MOVE",
-      "dx": details.delta.dx * sensitivity,
-      "dy": details.delta.dy * sensitivity,
-    });
+    _accumulatedDx += details.delta.dx;
+    _accumulatedDy += details.delta.dy;
+
+    final now = DateTime.now();
+    // THROTTLING: Hanya kirim data 60 kali per detik (setiap ~16ms)
+    if (now.difference(_lastPanTime).inMilliseconds >= 16) {
+      const double sensitivity = 2.5; 
+      _sendCommand({
+        "type": "MOUSE_MOVE",
+        "dx": _accumulatedDx * sensitivity,
+        "dy": _accumulatedDy * sensitivity,
+      });
+      
+      _lastPanTime = now;
+      _accumulatedDx = 0;
+      _accumulatedDy = 0;
+    }
   }
 
   void _onTap() {
