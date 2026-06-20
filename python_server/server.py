@@ -123,6 +123,7 @@ class PCMediaServerApp:
                     pyautogui.hotkey('ctrl', 'c')
                 elif key == "paste":
                     pyautogui.hotkey('ctrl', 'v')
+<<<<<<< HEAD
                 elif key == "alttab":
                     pyautogui.keyDown('alt')
                     pyautogui.press('tab')
@@ -139,6 +140,10 @@ class PCMediaServerApp:
                 pyautogui.keyDown('ctrl')
                 pyautogui.scroll(-150)
                 pyautogui.keyUp('ctrl')
+=======
+                else:
+                    pyautogui.press(key)
+>>>>>>> 3609f43ac92c7988b75a0c96b6780d2523f50de9
         elif action_type == "MEDIA":
             action = cmd.get("action", "")
             if action == "playpause":

@@ -228,12 +228,17 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
     }
   }
 
+<<<<<<< HEAD
   // --- MOUSE & GESTURE CONTROLS ---
+=======
+  // --- MOUSE CONTROLS ---
+>>>>>>> 3609f43ac92c7988b75a0c96b6780d2523f50de9
   double _accumulatedDx = 0;
   double _accumulatedDy = 0;
   DateTime _lastPanTime = DateTime.now();
   double _lastScale = 1.0;
 
+<<<<<<< HEAD
   void _onScaleStart(ScaleStartDetails details) {
     _lastScale = 1.0;
   }
@@ -282,6 +287,35 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
           _accumulatedDx = 0;
           _accumulatedDy = 0;
         }
+=======
+  void _onPanUpdate(DragUpdateDetails details, BoxConstraints constraints) {
+    // Hidden Scroll Zone (25% di sisi kanan untuk ruang yang lebih lega)
+    if (details.localPosition.dx > constraints.maxWidth * 0.75) {
+      final now = DateTime.now();
+      if (now.difference(_lastPanTime).inMilliseconds >= 16) {
+        _sendCommand({
+          "type": "SCROLL",
+          "dy": details.delta.dy,
+        });
+        _lastPanTime = now;
+      }
+    } else {
+      // Normal Mouse Move
+      _accumulatedDx += details.delta.dx;
+      _accumulatedDy += details.delta.dy;
+
+      final now = DateTime.now();
+      if (now.difference(_lastPanTime).inMilliseconds >= 16) {
+        const double sensitivity = 4.0; // Sensitivitas dinaikkan agar jangkauan lebih jauh
+        _sendCommand({
+          "type": "MOUSE_MOVE",
+          "dx": _accumulatedDx * sensitivity,
+          "dy": _accumulatedDy * sensitivity,
+        });
+        _lastPanTime = now;
+        _accumulatedDx = 0;
+        _accumulatedDy = 0;
+>>>>>>> 3609f43ac92c7988b75a0c96b6780d2523f50de9
       }
     }
   }
@@ -504,7 +538,10 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
                 scrollDirection: Axis.horizontal,
                 child: Row(
                   children: [
+<<<<<<< HEAD
                     _specialKeyBtn('Alt+Tab 🔀', 'alttab'),
+=======
+>>>>>>> 3609f43ac92c7988b75a0c96b6780d2523f50de9
                     _specialKeyBtn('Enter ↵', 'enter'),
                     _specialKeyBtn('Bksp ⌫', 'backspace'),
                     _specialKeyBtn('Win ❖', 'win'),
@@ -558,8 +595,12 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
                 child: LayoutBuilder(
                   builder: (context, constraints) {
                     return GestureDetector(
+<<<<<<< HEAD
                       onScaleStart: _onScaleStart,
                       onScaleUpdate: (details) => _onScaleUpdate(details, constraints),
+=======
+                      onPanUpdate: (details) => _onPanUpdate(details, constraints),
+>>>>>>> 3609f43ac92c7988b75a0c96b6780d2523f50de9
                       onTap: _onTap,
                       child: Container(
                         width: double.infinity,
