@@ -18,6 +18,7 @@ class _ScreenMirrorPageState extends State<ScreenMirrorPage> {
   Uint8List? _currentFrame;
 
   DateTime _lastMoveTime = DateTime.now();
+  final Set<int> _activePointers = {};
 
   @override
   void initState() {
@@ -104,59 +105,63 @@ class _ScreenMirrorPageState extends State<ScreenMirrorPage> {
                     aspectRatio: 16 / 9,
                     child: Builder(
                       builder: (context) {
-                        return Listener(
-                          onPointerDown: (e) {
-                            final size = context.size;
-                            if (size != null) {
-                              widget.sendCommand({
-                                "type": "TOUCH_DOWN",
-                                "rx": e.localPosition.dx / size.width,
-                                "ry": e.localPosition.dy / size.height,
-                              });
-                            }
-                          },
-                          onPointerMove: (e) {
-                            final size = context.size;
-                            if (size != null) {
-                              final now = DateTime.now();
-                              if (now.difference(_lastMoveTime).inMilliseconds >= 16) {
-                                widget.sendCommand({
-                                  "type": "TOUCH_MOVE",
-                                  "rx": e.localPosition.dx / size.width,
-                                  "ry": e.localPosition.dy / size.height,
-                                });
-                                _lastMoveTime = now;
+                        return InteractiveViewer(
+                          panEnabled: false, // Matikan 1-finger pan
+                          minScale: 1.0,
+                          maxScale: 5.0,
+                          child: Listener(
+                            onPointerDown: (e) {
+                              _activePointers.add(e.pointer);
+                              if (_activePointers.length == 1) {
+                                final size = context.size;
+                                if (size != null) {
+                                  widget.sendCommand({
+                                    "type": "TOUCH_DOWN",
+                                    "rx": e.localPosition.dx / size.width,
+                                    "ry": e.localPosition.dy / size.height,
+                                  });
+                                }
+                              } else if (_activePointers.length == 2) {
+                                widget.sendCommand({"type": "TOUCH_UP"});
                               }
-                            }
-                          },
-                          onPointerUp: (e) {
-                            final size = context.size;
-                            if (size != null) {
-                              widget.sendCommand({
-                                "type": "TOUCH_UP",
-                                "rx": e.localPosition.dx / size.width,
-                                "ry": e.localPosition.dy / size.height,
-                              });
-                            }
-                          },
-                          onPointerCancel: (e) {
-                            final size = context.size;
-                            if (size != null) {
-                              widget.sendCommand({
-                                "type": "TOUCH_UP",
-                                "rx": e.localPosition.dx / size.width,
-                                "ry": e.localPosition.dy / size.height,
-                              });
-                            }
-                          },
-                          child: Container(
-                            color: Colors.black, // background color
-                            width: double.infinity,
-                            height: double.infinity,
-                            child: Image.memory(
-                              _currentFrame!,
-                              gaplessPlayback: true,
-                              fit: BoxFit.fill,
+                            },
+                            onPointerMove: (e) {
+                              if (_activePointers.length == 1) {
+                                final size = context.size;
+                                if (size != null) {
+                                  final now = DateTime.now();
+                                  if (now.difference(_lastMoveTime).inMilliseconds >= 16) {
+                                    widget.sendCommand({
+                                      "type": "TOUCH_MOVE",
+                                      "rx": e.localPosition.dx / size.width,
+                                      "ry": e.localPosition.dy / size.height,
+                                    });
+                                    _lastMoveTime = now;
+                                  }
+                                }
+                              }
+                            },
+                            onPointerUp: (e) {
+                              _activePointers.remove(e.pointer);
+                              if (_activePointers.isEmpty) {
+                                widget.sendCommand({"type": "TOUCH_UP"});
+                              }
+                            },
+                            onPointerCancel: (e) {
+                              _activePointers.remove(e.pointer);
+                              if (_activePointers.isEmpty) {
+                                widget.sendCommand({"type": "TOUCH_UP"});
+                              }
+                            },
+                            child: Container(
+                              color: Colors.black, // background color
+                              width: double.infinity,
+                              height: double.infinity,
+                              child: Image.memory(
+                                _currentFrame!,
+                                gaplessPlayback: true,
+                                fit: BoxFit.fill,
+                              ),
                             ),
                           ),
                         );
