@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:permission_handler/permission_handler.dart';
 import 'package:flutter/services.dart';
+import 'screen_mirror.dart';
 
 void main() {
   runApp(const MobilePCApp());
@@ -520,6 +521,35 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
         title: const Text('MobilePC Control', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 20)),
         actions: [
           if (_isConnected) ...[
+            GestureDetector(
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => ScreenMirrorPage(
+                      serverIp: _ipController.text,
+                      sendCommand: _sendCommand,
+                    ),
+                  ),
+                );
+              },
+              child: Container(
+                margin: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                decoration: BoxDecoration(
+                  color: Colors.blueAccent.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: Colors.blueAccent.withOpacity(0.5)),
+                ),
+                child: Row(
+                  children: const [
+                    Icon(Icons.monitor, color: Colors.blueAccent, size: 16),
+                    SizedBox(width: 6),
+                    Text('Mirror', style: TextStyle(color: Colors.blueAccent, fontSize: 12, fontWeight: FontWeight.bold)),
+                  ],
+                ),
+              ),
+            ),
             GestureDetector(
               onTap: _toggleAudio,
               child: Container(

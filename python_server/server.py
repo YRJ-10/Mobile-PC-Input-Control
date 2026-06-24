@@ -6,11 +6,15 @@ import soundcard as sc
 import numpy as np
 import tkinter as tk
 from tkinter import font
+import struct
+import cv2
+import mss
 
 # Konfigurasi Port
 HOST = '0.0.0.0'  
 PORT = 8080
 UDP_PORT = 8081
+VIDEO_PORT = 8082
 
 class PCMediaServerApp:
     def __init__(self, root):
@@ -25,6 +29,7 @@ class PCMediaServerApp:
         self.server_socket = None
         self.server_thread = None
         self.audio_thread = None
+        self.video_thread = None
         self.client_ip = None
         self.client_ip_lock = threading.Lock()
         self.audio_enabled = True
@@ -150,6 +155,16 @@ class PCMediaServerApp:
                 VK_MEDIA_PLAY_PAUSE = 0xB3
                 ctypes.windll.user32.keybd_event(VK_MEDIA_PLAY_PAUSE, 0, 0, 0) # Key Down
                 ctypes.windll.user32.keybd_event(VK_MEDIA_PLAY_PAUSE, 0, 2, 0) # Key Up
+        elif action_type in ["TOUCH_DOWN", "TOUCH_MOVE", "TOUCH_UP"]:
+            screen_width, screen_height = pyautogui.size()
+            x = int(cmd.get("rx", 0.5) * screen_width)
+            y = int(cmd.get("ry", 0.5) * screen_height)
+            pyautogui.moveTo(x, y)
+            
+            if action_type == "TOUCH_DOWN":
+                pyautogui.mouseDown(button='left')
+            elif action_type == "TOUCH_UP":
+                pyautogui.mouseUp(button='left')
 
     def handle_client(self, conn, addr):
         self.update_status(f"HP Terhubung: {addr[0]}", "#00E5FF")
@@ -182,6 +197,47 @@ class PCMediaServerApp:
                     self.client_ip = None
             if self.is_running:
                 self.update_status("Status: Menunggu Koneksi HP...", "#FFD600")
+
+    def video_stream_listener(self):
+        video_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        video_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            video_socket.bind((HOST, VIDEO_PORT))
+            video_socket.listen(5)
+            video_socket.settimeout(1.0)
+            
+            while self.is_running:
+                try:
+                    conn, addr = video_socket.accept()
+                except socket.timeout:
+                    continue
+                
+                with mss.mss() as sct:
+                    # Ambil monitor primer
+                    monitor = sct.monitors[1]
+                    while self.is_running:
+                        try:
+                            # Capture and compress
+                            img = np.array(sct.grab(monitor))
+                            frame = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
+                            frame = cv2.resize(frame, (1280, 720))
+                            ret, jpeg = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 50])
+                            
+                            if not ret: continue
+                            
+                            data = jpeg.tobytes()
+                            size_bytes = struct.pack("!I", len(data))
+                            conn.sendall(size_bytes + data)
+                        except Exception as e:
+                            break
+                conn.close()
+        except Exception:
+            pass
+        finally:
+            try:
+                video_socket.close()
+            except:
+                pass
 
     def discovery_listener(self):
         udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -235,6 +291,10 @@ class PCMediaServerApp:
         # Jalankan UDP Discovery Listener
         self.discovery_thread = threading.Thread(target=self.discovery_listener, daemon=True)
         self.discovery_thread.start()
+        
+        # Jalankan Video Stream Listener
+        self.video_thread = threading.Thread(target=self.video_stream_listener, daemon=True)
+        self.video_thread.start()
 
     def stop_server(self):
         self.is_running = False
