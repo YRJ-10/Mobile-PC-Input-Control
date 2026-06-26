@@ -38,7 +38,7 @@ class RemoteHomePage extends StatefulWidget {
   State<RemoteHomePage> createState() => _RemoteHomePageState();
 }
 
-class _RemoteHomePageState extends State<RemoteHomePage> {
+class _RemoteHomePageState extends State<RemoteHomePage> with WidgetsBindingObserver {
   final TextEditingController _ipController = TextEditingController();
   final TextEditingController _textController = TextEditingController();
   
@@ -46,6 +46,7 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
   bool _isConnected = false;
   String _statusMessage = "Disconnected";
   bool _isScanning = false;
+  double _lastBottomInset = 0.0;
 
   late stt.SpeechToText _speech;
   bool _isListening = false;
@@ -57,6 +58,7 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _speech = stt.SpeechToText();
     _requestMicrophonePermission();
   }
@@ -70,11 +72,26 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _socket?.close();
     _ipController.dispose();
     _textController.dispose();
     _stopNativeAudioReceiver();
     super.dispose();
+  }
+
+  @override
+  void didChangeMetrics() {
+    super.didChangeMetrics();
+    final bottomInset = WidgetsBinding.instance.platformDispatcher.views.first.viewInsets.bottom;
+    
+    // Hanya unfocus jika keyboard SEBELUMNYA terbuka (> 0) lalu tertutup (== 0)
+    if (_lastBottomInset > 0.0 && bottomInset == 0.0) {
+      FocusManager.instance.primaryFocus?.unfocus();
+      _textController.clear();
+      _lastText = "";
+    }
+    _lastBottomInset = bottomInset;
   }
 
   Future<void> _startNativeAudioReceiver() async {
@@ -462,8 +479,9 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
     setState(() => _isListening = false);
   }
 
-  InputDecoration _modernInputDecoration(String label) {
+  InputDecoration _modernInputDecoration(String label, {Widget? suffixIcon}) {
     return InputDecoration(
+      suffixIcon: suffixIcon,
       labelText: label,
       labelStyle: const TextStyle(color: Colors.grey),
       filled: true,
@@ -652,7 +670,17 @@ class _RemoteHomePageState extends State<RemoteHomePage> {
                   Expanded(
                     child: TextField(
                       controller: _textController,
-                      decoration: _modernInputDecoration('Live Type to PC...'),
+                      decoration: _modernInputDecoration(
+                        'Live Type to PC...',
+                        suffixIcon: IconButton(
+                          icon: const Icon(Icons.clear, color: Colors.grey, size: 20),
+                          onPressed: () {
+                            _textController.clear();
+                            _lastText = "";
+                            FocusManager.instance.primaryFocus?.unfocus();
+                          },
+                        ),
+                      ),
                       style: const TextStyle(color: Colors.white),
                       onChanged: _onTextChanged,
                     ),
