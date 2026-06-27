@@ -5,7 +5,6 @@ import pyautogui
 import soundcard as sc
 import numpy as np
 import tkinter as tk
-from tkinter import font
 import struct
 import cv2
 import mss
@@ -19,10 +18,25 @@ VIDEO_PORT = 8082
 class PCMediaServerApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("PC Media Server")
-        self.root.geometry("450x300")
-        self.root.configure(bg="#1E1E2C")
+        self.root.title("MobilePC Server")
+        self.root.geometry("560x460")
+        self.root.configure(bg="#0F111A")
         self.root.resizable(False, False)
+        self.colors = {
+            "bg": "#0F111A",
+            "panel": "#131520",
+            "panel_alt": "#1A1D2D",
+            "border": "#243044",
+            "text": "#FFFFFF",
+            "muted": "#8D94A6",
+            "teal": "#64FFDA",
+            "teal_dark": "#00796B",
+            "green": "#69F0AE",
+            "yellow": "#FFD600",
+            "red": "#FF5252",
+            "red_dark": "#2A1515",
+            "blue": "#448AFF",
+        }
         
         # Variabel State
         self.is_running = False
@@ -40,44 +54,231 @@ class PCMediaServerApp:
         self.audio_thread = threading.Thread(target=self.audio_streamer, daemon=True)
         self.audio_thread.start()
         
+
     def setup_ui(self):
-        # Header Judul
-        lbl_title = tk.Label(self.root, text="Remote PC Server", font=("Segoe UI", 22, "bold"), bg="#1E1E2C", fg="#00E5FF")
-        lbl_title.pack(pady=(25, 5))
-        
-        lbl_subtitle = tk.Label(self.root, text="Hubungkan HP Anda ke IP di bawah ini:", font=("Segoe UI", 11), bg="#1E1E2C", fg="#A0A0B5")
-        lbl_subtitle.pack()
-        
-        # Kotak Tampilan IP Address (Mengambil IP Wi-Fi asli yang menghadap ke luar)
+        self.root.option_add("*Font", ("Segoe UI", 10))
+
+        shell = tk.Frame(self.root, bg=self.colors["bg"], padx=24, pady=22)
+        shell.pack(fill=tk.BOTH, expand=True)
+
+        header = tk.Frame(shell, bg=self.colors["bg"])
+        header.pack(fill=tk.X)
+
+        title_group = tk.Frame(header, bg=self.colors["bg"])
+        title_group.pack(side=tk.LEFT, anchor="w")
+
+        tk.Label(
+            title_group,
+            text="MobilePC Server",
+            font=("Segoe UI", 24, "bold"),
+            bg=self.colors["bg"],
+            fg=self.colors["text"],
+        ).pack(anchor="w")
+
+        tk.Label(
+            title_group,
+            text="Windows control bridge for your Android phone",
+            font=("Segoe UI", 10),
+            bg=self.colors["bg"],
+            fg=self.colors["muted"],
+        ).pack(anchor="w", pady=(2, 0))
+
+        self.status_badge = tk.Label(
+            header,
+            text="OFFLINE",
+            font=("Segoe UI", 10, "bold"),
+            bg=self.colors["red_dark"],
+            fg=self.colors["red"],
+            padx=14,
+            pady=7,
+        )
+        self.status_badge.pack(side=tk.RIGHT, anchor="ne", pady=4)
+
+        self.local_ip = self.get_local_ip()
+
+        ip_card = tk.Frame(
+            shell,
+            bg=self.colors["panel"],
+            highlightbackground=self.colors["border"],
+            highlightthickness=1,
+            padx=20,
+            pady=18,
+        )
+        ip_card.pack(fill=tk.X, pady=(26, 16))
+
+        tk.Label(
+            ip_card,
+            text="PC IP ADDRESS",
+            font=("Segoe UI", 9, "bold"),
+            bg=self.colors["panel"],
+            fg=self.colors["muted"],
+        ).pack(anchor="w")
+
+        ip_row = tk.Frame(ip_card, bg=self.colors["panel"])
+        ip_row.pack(fill=tk.X, pady=(6, 0))
+
+        self.lbl_ip = tk.Label(
+            ip_row,
+            text=self.local_ip,
+            font=("Consolas", 28, "bold"),
+            bg=self.colors["panel"],
+            fg=self.colors["teal"],
+        )
+        self.lbl_ip.pack(side=tk.LEFT, anchor="w")
+
+        self.btn_copy = self.make_button(
+            ip_row,
+            text="COPY IP",
+            command=self.copy_ip,
+            bg=self.colors["panel_alt"],
+            fg=self.colors["teal"],
+            active_bg="#20263A",
+            width=10,
+        )
+        self.btn_copy.pack(side=tk.RIGHT, anchor="e", pady=4)
+
+        self.btn_frame = tk.Frame(shell, bg=self.colors["bg"])
+        self.btn_frame.pack(fill=tk.X, pady=(0, 16))
+
+        self.btn_start = self.make_button(
+            self.btn_frame,
+            text="START SERVER",
+            command=self.start_server,
+            bg=self.colors["teal_dark"],
+            fg="white",
+            active_bg="#00897B",
+            width=18,
+            height=2,
+        )
+        self.btn_start.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 8))
+
+        self.btn_stop = self.make_button(
+            self.btn_frame,
+            text="STOP SERVER",
+            command=self.stop_server,
+            bg=self.colors["red_dark"],
+            fg=self.colors["red"],
+            active_bg="#3A1D1D",
+            width=18,
+            height=2,
+            state=tk.DISABLED,
+        )
+        self.btn_stop.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(8, 0))
+
+        status_card = tk.Frame(
+            shell,
+            bg=self.colors["panel_alt"],
+            highlightbackground=self.colors["border"],
+            highlightthickness=1,
+            padx=18,
+            pady=14,
+        )
+        status_card.pack(fill=tk.X, pady=(0, 16))
+
+        tk.Label(
+            status_card,
+            text="Connection status",
+            font=("Segoe UI", 10, "bold"),
+            bg=self.colors["panel_alt"],
+            fg=self.colors["text"],
+        ).pack(anchor="w")
+
+        self.lbl_status = tk.Label(
+            status_card,
+            text="Offline. Click Start to accept phone connection.",
+            font=("Segoe UI", 10),
+            bg=self.colors["panel_alt"],
+            fg=self.colors["red"],
+            wraplength=480,
+            justify=tk.LEFT,
+        )
+        self.lbl_status.pack(anchor="w", pady=(4, 0))
+
+        ports = tk.Frame(shell, bg=self.colors["bg"])
+        ports.pack(fill=tk.X, pady=(2, 20))
+        self.make_info_pill(ports, "CONTROL", f"TCP {PORT}", self.colors["teal"]).pack(side=tk.LEFT, padx=(0, 8))
+        self.make_info_pill(ports, "DISCOVERY/AUDIO", f"UDP {UDP_PORT}", self.colors["green"]).pack(side=tk.LEFT, padx=(0, 8))
+        self.make_info_pill(ports, "MIRROR", f"TCP {VIDEO_PORT}", self.colors["blue"]).pack(side=tk.LEFT)
+
+        tk.Label(
+            shell,
+            text="Keep this window open while using the Android app.",
+            font=("Segoe UI", 9),
+            bg=self.colors["bg"],
+            fg=self.colors["muted"],
+        ).pack(anchor="w", pady=(16, 0))
+
+    def get_local_ip(self):
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             s.connect(("8.8.8.8", 80))
             local_ip = s.getsockname()[0]
             s.close()
+            return local_ip
         except Exception:
-            local_ip = "127.0.0.1"
-            
-        self.lbl_ip = tk.Label(self.root, text=f"{local_ip}", font=("Consolas", 24, "bold"), bg="#2B2B3C", fg="#00FF88", padx=20, pady=10)
-        self.lbl_ip.pack(pady=15)
-        
-        # Teks Status Koneksi
-        self.lbl_status = tk.Label(self.root, text="Status: Offline (Klik Start)", font=("Segoe UI", 11, "italic"), bg="#1E1E2C", fg="#FF4444")
-        self.lbl_status.pack(pady=5)
-        
-        # Barisan Tombol
-        self.btn_frame = tk.Frame(self.root, bg="#1E1E2C")
-        self.btn_frame.pack(pady=10)
-        
-        self.btn_start = tk.Button(self.btn_frame, text="▶ START", font=("Segoe UI", 12, "bold"), bg="#00C853", fg="white", width=12, relief="flat", command=self.start_server)
-        self.btn_start.grid(row=0, column=0, padx=10)
-        
-        self.btn_stop = tk.Button(self.btn_frame, text="■ STOP", font=("Segoe UI", 12, "bold"), bg="#D50000", fg="white", width=12, relief="flat", command=self.stop_server, state=tk.DISABLED)
-        self.btn_stop.grid(row=0, column=1, padx=10)
+            return "127.0.0.1"
+
+    def make_button(self, parent, text, command, bg, fg, active_bg, width=12, height=1, state=tk.NORMAL):
+        return tk.Button(
+            parent,
+            text=text,
+            command=command,
+            font=("Segoe UI", 10, "bold"),
+            bg=bg,
+            fg=fg,
+            activebackground=active_bg,
+            activeforeground=fg,
+            disabledforeground="#5C6375",
+            relief=tk.FLAT,
+            borderwidth=0,
+            width=width,
+            height=height,
+            cursor="hand2",
+            state=state,
+        )
+
+    def make_info_pill(self, parent, label, value, color):
+        pill = tk.Frame(
+            parent,
+            bg=self.colors["panel"],
+            highlightbackground=self.colors["border"],
+            highlightthickness=1,
+            padx=12,
+            pady=8,
+        )
+        tk.Label(
+            pill,
+            text=label,
+            font=("Segoe UI", 8, "bold"),
+            bg=self.colors["panel"],
+            fg=self.colors["muted"],
+        ).pack(anchor="w")
+        tk.Label(
+            pill,
+            text=value,
+            font=("Segoe UI", 10, "bold"),
+            bg=self.colors["panel"],
+            fg=color,
+        ).pack(anchor="w", pady=(1, 0))
+        return pill
+
+    def copy_ip(self):
+        self.root.clipboard_clear()
+        self.root.clipboard_append(self.local_ip)
+        self.update_status("IP address copied. Paste it in the Android app if auto-scan fails.", self.colors["teal"])
 
     # Helper untuk update teks status dengan aman dari Thread berbeda
     def update_status(self, text, color="#FFFFFF"):
         def update():
             self.lbl_status.config(text=text, fg=color)
+            if color == self.colors["red"]:
+                self.status_badge.config(text="OFFLINE", bg=self.colors["red_dark"], fg=self.colors["red"])
+            elif color == self.colors["yellow"]:
+                self.status_badge.config(text="WAITING", bg="#2E2A12", fg=self.colors["yellow"])
+            elif color in (self.colors["teal"], "#00E5FF"):
+                self.status_badge.config(text="CONNECTED", bg="#102C2D", fg=self.colors["teal"])
+            else:
+                self.status_badge.config(text="ONLINE", bg="#123020", fg=self.colors["green"])
         self.root.after(0, update)
 
     def audio_streamer(self):
@@ -167,7 +368,7 @@ class PCMediaServerApp:
                 pyautogui.mouseUp(button='left')
 
     def handle_client(self, conn, addr):
-        self.update_status(f"HP Terhubung: {addr[0]}", "#00E5FF")
+        self.update_status(f"HP Terhubung: {addr[0]}", self.colors["teal"])
         with self.client_ip_lock:
             self.client_ip = addr[0]
             
@@ -196,7 +397,7 @@ class PCMediaServerApp:
                 if self.client_ip == addr[0]:
                     self.client_ip = None
             if self.is_running:
-                self.update_status("Status: Menunggu Koneksi HP...", "#FFD600")
+                self.update_status("Status: Menunggu Koneksi HP...", self.colors["yellow"])
 
     def video_stream_listener(self):
         video_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -269,7 +470,7 @@ class PCMediaServerApp:
                 except OSError:
                     break # Akan terjadi jika stop_server dipanggil (socket diclose)
         except Exception as e:
-            self.update_status(f"Error: Port {PORT} mungkin terpakai", "#FF4444")
+            self.update_status(f"Error: Port {PORT} mungkin terpakai", self.colors["red"])
             self.stop_server()
 
     def start_server(self):
@@ -282,7 +483,7 @@ class PCMediaServerApp:
         
         self.btn_start.config(state=tk.DISABLED)
         self.btn_stop.config(state=tk.NORMAL)
-        self.update_status("Status: Menunggu Koneksi HP...", "#FFD600")
+        self.update_status("Status: Menunggu Koneksi HP...", self.colors["yellow"])
         
         # Jalankan server jaringan di Thread agar tidak nge-hang
         self.network_thread = threading.Thread(target=self.server_loop, daemon=True)
@@ -309,7 +510,7 @@ class PCMediaServerApp:
             
         self.btn_start.config(state=tk.NORMAL)
         self.btn_stop.config(state=tk.DISABLED)
-        self.update_status("Status: Offline (Klik Start)", "#FF4444")
+        self.update_status("Status: Offline (Klik Start)", self.colors["red"])
 
 if __name__ == "__main__":
     root = tk.Tk()
