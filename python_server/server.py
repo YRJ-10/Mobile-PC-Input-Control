@@ -194,19 +194,13 @@ class PCMediaServerApp:
         )
         self.lbl_status.pack(anchor="w", pady=(4, 0))
 
-        ports = tk.Frame(shell, bg=self.colors["bg"])
-        ports.pack(fill=tk.X, pady=(2, 20))
-        self.make_info_pill(ports, "CONTROL", f"TCP {PORT}", self.colors["teal"]).pack(side=tk.LEFT, padx=(0, 8))
-        self.make_info_pill(ports, "DISCOVERY/AUDIO", f"UDP {UDP_PORT}", self.colors["green"]).pack(side=tk.LEFT, padx=(0, 8))
-        self.make_info_pill(ports, "MIRROR", f"TCP {VIDEO_PORT}", self.colors["blue"]).pack(side=tk.LEFT)
-
         tk.Label(
             shell,
-            text="Keep this window open while using the Android app.",
+            text=f"Keep this window open while using the Android app. Ports: {PORT}, {UDP_PORT}, {VIDEO_PORT}.",
             font=("Segoe UI", 9),
             bg=self.colors["bg"],
             fg=self.colors["muted"],
-        ).pack(anchor="w", pady=(16, 0))
+        ).pack(anchor="w", pady=(2, 0))
 
     def get_local_ip(self):
         try:
@@ -236,31 +230,6 @@ class PCMediaServerApp:
             cursor="hand2",
             state=state,
         )
-
-    def make_info_pill(self, parent, label, value, color):
-        pill = tk.Frame(
-            parent,
-            bg=self.colors["panel"],
-            highlightbackground=self.colors["border"],
-            highlightthickness=1,
-            padx=12,
-            pady=8,
-        )
-        tk.Label(
-            pill,
-            text=label,
-            font=("Segoe UI", 8, "bold"),
-            bg=self.colors["panel"],
-            fg=self.colors["muted"],
-        ).pack(anchor="w")
-        tk.Label(
-            pill,
-            text=value,
-            font=("Segoe UI", 10, "bold"),
-            bg=self.colors["panel"],
-            fg=color,
-        ).pack(anchor="w", pady=(1, 0))
-        return pill
 
     def copy_ip(self):
         self.root.clipboard_clear()
